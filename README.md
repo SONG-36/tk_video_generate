@@ -19,19 +19,12 @@ single-task Seedance provider infrastructure.
 - No real batch generation.
 - Requires official provider configuration from server environment variables.
 - Current provider channel: BytePlus ModelArk Seedance.
-- Official create-task documentation: https://docs.byteplus.com/en/docs/ModelArk/1520757
-- Official retrieve-task documentation: https://docs.byteplus.com/en/docs/ModelArk/1521309
-- Official authentication documentation: https://docs.byteplus.com/en/docs/ModelArk/1298459
+- Official documentation source: https://docs.byteplus.com/en/docs/ModelArk/1520757
 - Documentation access date: 2026-07-24.
 - API surface implemented: ModelArk API v3 task submit and task query endpoints.
-
-Real submissions require a task-specific HTTPS first-frame `image_url`. The
-local uploaded image is saved only as a preview/audit file in real mode; it is
-not uploaded to BytePlus and is not sent in the Seedance request. Mock mode still
-uses local images.
-
-See [docs/SEEDANCE_PROVIDER_CONTRACT.md](docs/SEEDANCE_PROVIDER_CONTRACT.md) for
-the official contract evidence and field mapping.
+- Real submissions use a task-level Seedance image URL. The local uploaded image
+  is stored as the local preview/audit file only and is not uploaded to
+  BytePlus by this prototype.
 
 ## Configuration
 
@@ -40,32 +33,30 @@ it. The app itself does not auto-load `.env`.
 
 Required for Seedance mode:
 
-macOS/Linux:
+```dotenv
+VIDEO_PROVIDER=byteplus_seedance
+SEEDANCE_API_KEY=
+SEEDANCE_BASE_URL=https://ark.ap-southeast.bytepluses.com/api/v3
+SEEDANCE_MODEL=
+REAL_VIDEO_MAX_COST_USD=1.00
+```
+
+macOS/Linux shells:
 
 ```bash
-export VIDEO_PROVIDER="byteplus_seedance"
 export SEEDANCE_API_KEY="..."
-export SEEDANCE_BASE_URL="https://ark.ap-southeast.bytepluses.com/api/v3"
 export SEEDANCE_MODEL="..."
-export REAL_VIDEO_MAX_COST_USD="1.00"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:VIDEO_PROVIDER="byteplus_seedance"
 $env:SEEDANCE_API_KEY="..."
-$env:SEEDANCE_BASE_URL="https://ark.ap-southeast.bytepluses.com/api/v3"
 $env:SEEDANCE_MODEL="..."
-$env:REAL_VIDEO_MAX_COST_USD="1.00"
 ```
 
 Never commit `.env` or API keys. The app only displays configuration status as
 `Configured` or `Missing`; it does not print key contents.
-
-`REAL_VIDEO_MAX_COST_USD` is retained as an operator acknowledgement amount in
-V0.2.1. It is not a Provider-enforced spending ceiling because the official
-model/endpoint price formula is not implemented in code.
 
 ## Run
 
@@ -112,7 +103,7 @@ Real provider tasks save:
 
 ## Real Smoke Test
 
-Do not run this casually. It can call a real paid API.
+Dry Run does not access the network and does not call the real API:
 
 ```bash
 python scripts/real_seedance_smoke.py \
@@ -121,24 +112,25 @@ python scripts/real_seedance_smoke.py \
   --prompt "A controlled slow camera movement around the product."
 ```
 
-For real execution, the script requires both the task-specific Seedance input
-URL and a separate local preview/audit image. Do not run this casually. It can
-call a real paid API.
+Do not run this casually. It can call a real paid API.
 
 ```bash
 python scripts/real_seedance_smoke.py \
   --allow-real-api \
   --human-confirm "CONFIRM REAL SMOKE" \
   --image-url "https://example.com/first-frame.png" \
-  --local-preview-image /absolute/path/to/local-preview.png \
+  --local-preview-image /absolute/path/to/first-frame.png \
   --prompt "A controlled slow camera movement around the product." \
-  --operator-cost-ack-usd 1.00
+  --operator-max-cost-ack-usd 1.00
 ```
 
 The script refuses to call the API unless all explicit confirmation arguments
-are present. It submits exactly one task and does not perform batch generation.
-`--operator-cost-ack-usd` is an acknowledgement amount, not a Provider-enforced
-ceiling.
+are present. `--image-url` is the image sent in the Seedance payload.
+`--local-preview-image` is only stored locally for preview and audit. It submits
+exactly one task and does not perform batch generation.
+
+Seedance cost estimation is currently unknown. The operator acknowledgment amount
+is a local confirmation value, not a provider-enforced spending ceiling.
 
 ## Current Limits
 

@@ -41,7 +41,7 @@ This V0.2.1 implementation uses URL-only real mode:
 - real Seedance tasks require a task-specific HTTPS `image_url`.
 - local first-frame uploads are retained only as local preview/audit files.
 - the Provider sends `content[].image_url.url` from the current task's `image_url`.
-- the Provider does not use a global `SEEDANCE_IMAGE_URL`.
+- the Provider does not use a global environment image URL.
 - the Provider does not send local server file paths.
 
 Base64/data URI submission is officially supported by the field, but this project does not implement local-file-to-base64 submission in V0.2.1. Object-storage or asset publishing is also not implemented in V0.2.1.

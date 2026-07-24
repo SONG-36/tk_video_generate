@@ -23,8 +23,7 @@ class BytePlusSeedanceProvider(VideoProvider):
     """BytePlus ModelArk Seedance provider.
 
     Contract recorded from official BytePlus ModelArk API documentation accessed
-    2026-07-24. Real submissions use a task-specific HTTPS image URL. Local
-    upload paths are retained only for preview/audit and are not sent to Seedance.
+    2026-07-24. Real submissions use a task-level HTTPS first-frame URL.
     """
 
     name = "byteplus_seedance"
@@ -47,11 +46,11 @@ class BytePlusSeedanceProvider(VideoProvider):
         if not task.image_url:
             raise ProviderError(
                 "PROVIDER_VALIDATION_ERROR",
-                "Task-specific image_url is required for Seedance real submissions.",
+                "Seedance task image_url is required.",
             )
         parsed = urlparse(task.image_url)
         if parsed.scheme != "https" or not parsed.netloc:
-            raise ProviderError("PROVIDER_VALIDATION_ERROR", "Task image_url must be HTTPS.")
+            raise ProviderError("PROVIDER_VALIDATION_ERROR", "Seedance image_url must be HTTPS.")
         if task.duration_seconds not in {3, 5, 10}:
             raise ProviderError("PROVIDER_VALIDATION_ERROR", "Unsupported duration.")
         if task.aspect_ratio not in {"9:16", "1:1", "16:9"}:
@@ -169,6 +168,18 @@ class BytePlusSeedanceProvider(VideoProvider):
             "ratio": task.aspect_ratio,
         }
 
+    def build_redacted_request(self, task: VideoTask) -> dict[str, Any]:
+        """Return the exact submit request shape with sensitive fields redacted."""
+        return {
+            "method": "POST",
+            "url": f"{self.config.seedance_base_url.rstrip('/')}/contents/generations/tasks",
+            "headers": {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer [REDACTED]",
+            },
+            "json": self.redacted_payload(self.request_payload(task)),
+        }
+
     def _json_response(self, response: httpx.Response) -> dict[str, Any]:
         try:
             parsed = response.json()
@@ -193,18 +204,16 @@ class BytePlusSeedanceProvider(VideoProvider):
         return str(value or "unknown").lower()
 
     def _map_status(self, provider_status: str) -> str:
-        if provider_status == "queued":
+        if provider_status in {"queued", "pending", "created", "submitted"}:
             return "queued"
-        if provider_status == "running":
+        if provider_status in {"running", "processing", "in_progress"}:
             return "running"
-        if provider_status == "succeeded":
+        if provider_status in {"succeeded", "success", "completed"}:
             return "succeeded"
-        if provider_status == "failed":
+        if provider_status in {"failed", "error", "expired"}:
             return "failed"
-        if provider_status == "cancelled":
+        if provider_status in {"cancelled", "canceled"}:
             return "cancelled"
-        if provider_status == "expired":
-            return "failed"
         return "unknown"
 
     def _extract_result_url(self, raw: dict[str, Any]) -> str | None:
@@ -232,7 +241,9 @@ class BytePlusSeedanceProvider(VideoProvider):
         redacted = self._redact(payload)
         for item in redacted.get("content", []):
             if isinstance(item, dict) and item.get("type") == "image_url":
-                item["image_url"] = {"url": "[REDACTED_URL_PRESENT]"}
+                url = item.get("image_url", {}).get("url")
+                host = urlparse(url).netloc if isinstance(url, str) else ""
+                item["image_url"] = {"url": f"[REDACTED_URL_HOST:{host or 'unknown'}]"}
         return redacted
 
     def _redact(self, value: Any) -> Any:

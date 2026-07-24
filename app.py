@@ -40,21 +40,11 @@ def render_create_batch(service: WorkbenchService) -> None:
         duration_seconds = st.selectbox("Duration", options=[3, 5, 10], index=1)
         aspect_ratio = st.selectbox("Aspect ratio", options=["9:16", "1:1", "16:9"], index=0)
         uploads = st.file_uploader(
-            "First-frame images (local preview / mock input)",
+            "First-frame images",
             type=["png", "jpg", "jpeg"],
             accept_multiple_files=not is_real,
             key=f"uploads-{batch_id}",
         )
-        seedance_image_url = None
-        if is_real:
-            seedance_image_url = st.text_input(
-                "Seedance actual first-frame HTTPS URL",
-                placeholder="https://example.com/first-frame.png",
-            )
-            st.caption(
-                "Local uploaded image is only a local preview/audit file in real mode. "
-                "The Seedance request uses the task-specific HTTPS URL above."
-            )
         prompt_text = st.text_area(
             "Prompts, one line per image",
             height=180,
@@ -69,6 +59,18 @@ def render_create_batch(service: WorkbenchService) -> None:
         if is_real and len(prompts) > 1:
             prompts = prompts[:1]
         uploaded_list = uploads if isinstance(uploads, list) else ([uploads] if uploads else [])
+        image_urls: list[str] | None = None
+        if is_real:
+            st.caption("本地预览图: uploaded first-frame image")
+            task_image_url = st.text_input(
+                "Seedance actual input URL",
+                key=f"seedance-image-url-{batch_id}",
+                placeholder="https://example.com/first-frame.png",
+            )
+            image_urls = [task_image_url.strip()] if task_image_url.strip() else []
+            st.warning(
+                "本地上传图当前不会自动上传到公网。Seedance 实际请求只使用上面的 HTTPS URL。"
+            )
         valid_task_count = min(len(uploaded_list), len(prompts), 10) if uploaded_list else 0
         if is_real:
             valid_task_count = min(len(uploaded_list), len(prompts), 1)
@@ -88,8 +90,8 @@ def render_create_batch(service: WorkbenchService) -> None:
             st.caption("Task count: 1 | Concurrency: 1")
             st.caption("费用未知。系统无法在提交前保证实际费用低于填写金额。")
             st.caption(
-                f"Operator acknowledgement amount: ${service.config.real_video_max_cost_usd:.2f} "
-                "(not a Provider-enforced ceiling)"
+                "Operator acknowledgment amount: "
+                f"${service.config.real_video_max_cost_usd:.2f}"
             )
             paid_confirmed = st.checkbox(
                 "我理解当前费用未知，填写金额不是 Provider 强制消费上限。"
@@ -120,7 +122,7 @@ def render_create_batch(service: WorkbenchService) -> None:
             provider_name=provider_name,
             real_api_confirmed=paid_confirmed,
             maximum_cost_usd=service.config.real_video_max_cost_usd,
-            image_urls=[seedance_image_url] if is_real else None,
+            image_urls=image_urls,
         )
     except ValueError as exc:
         st.error(str(exc))

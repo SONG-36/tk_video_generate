@@ -287,9 +287,9 @@ class WorkbenchService:
         if not image_urls or len(image_urls) != len(uploaded_files):
             raise ValueError("Seedance mode requires a task-specific image_url.")
         for image_url in image_urls:
-            self._validate_seedance_image_url(image_url)
+            self._validate_task_image_url(image_url)
 
-    def _validate_seedance_image_url(self, image_url: str | None) -> None:
+    def _validate_task_image_url(self, image_url: str | None) -> None:
         if not image_url or not image_url.strip():
             raise ValueError("Seedance mode requires a task-specific image_url.")
         parsed = urlparse(image_url.strip())
