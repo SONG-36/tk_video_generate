@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tk_video_generate.enums import TaskStatus
+from tk_video_generate.enums import BatchStatus, TaskStatus
 
 
 @dataclass(frozen=True)
@@ -10,6 +10,7 @@ class VideoBatch:
     id: str
     name: str
     provider: str
+    status: BatchStatus
     concurrency_limit: int
     confirmation_text: str
     total_tasks: int
@@ -38,3 +39,17 @@ class VideoTask:
     created_at: str
     updated_at: str
     completed_at: str | None
+    model: str | None = None
+    image_url: str | None = None
+    provider_status: str | None = None
+    result_url: str | None = None
+    estimated_cost: float | None = None
+    actual_cost: float | None = None
+    provider_response_path: str | None = None
+    provider_request_path: str | None = None
+    provider_error_payload_path: str | None = None
+    submitted_at: str | None = None
+    last_polled_at: str | None = None
+    next_poll_at: str | None = None
+    poll_count: int = 0
+    download_started_at: str | None = None

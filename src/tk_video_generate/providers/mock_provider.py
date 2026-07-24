@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -8,8 +9,21 @@ from pathlib import Path
 from PIL import Image
 
 from tk_video_generate.config import AppConfig
+from tk_video_generate.enums import TaskStatus
 from tk_video_generate.models import VideoTask
-from tk_video_generate.providers.base import ProviderError, VideoProvider
+from tk_video_generate.providers.base import (
+    ProviderError,
+    ProviderPollResult,
+    ProviderSubmission,
+    VideoProvider,
+)
+from tk_video_generate.services.time import now_iso
+
+TARGET_DIMENSIONS = {
+    "9:16": (540, 960),
+    "1:1": (720, 720),
+    "16:9": (960, 540),
+}
 
 
 class MockVideoProvider(VideoProvider):
@@ -18,14 +32,47 @@ class MockVideoProvider(VideoProvider):
     def __init__(self, config: AppConfig) -> None:
         self.config = config
 
-    def estimate_cost(self, task_count: int, duration_seconds: int) -> float:
+    def estimate_batch_cost(self, task_count: int, duration_seconds: int) -> float:
         return round(task_count * duration_seconds * 0.01, 2)
+
+    def validate(self, task: VideoTask) -> None:
+        self._validate_image(Path(task.image_path))
+
+    def estimate_cost(self, task: VideoTask) -> float:
+        return round(task.duration_seconds * 0.01, 2)
+
+    def submit(self, task: VideoTask, output_dir: Path) -> ProviderSubmission:
+        result = self.generate(task, output_dir)
+        return ProviderSubmission(
+            provider_task_id=str(result["provider_task_id"]),
+            raw_response=result,
+        )
+
+    def poll(self, provider_task_id: str) -> ProviderPollResult:
+        return ProviderPollResult(
+            status="succeeded",
+            progress=100,
+            result_url=f"mock://{provider_task_id}/result.mp4",
+            error_code=None,
+            error_message=None,
+            raw_response={"provider_task_id": provider_task_id, "status": "succeeded"},
+        )
+
+    def download(self, result_url: str, output_path: Path) -> Path:
+        source = output_path.parent / "result.mp4"
+        if source.resolve() != output_path.resolve() and source.exists():
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, output_path)
+        if not output_path.exists():
+            raise ProviderError("RESULT_DOWNLOAD_FAILED", "Mock result file is missing.")
+        return output_path
 
     def generate(self, task: VideoTask, output_dir: Path) -> dict[str, object]:
         prompt = task.prompt.lower()
         request_path = output_dir / "request.json"
         result_path = output_dir / "result.json"
         video_path = output_dir / "result.mp4"
+        requested_at = now_iso()
 
         self._write_json(
             request_path,
@@ -37,29 +84,38 @@ class MockVideoProvider(VideoProvider):
                 "duration_seconds": task.duration_seconds,
                 "aspect_ratio": task.aspect_ratio,
                 "image_path": task.image_path,
+                "requested_at": requested_at,
             },
         )
 
         if "[mock-fail]" in prompt:
-            time.sleep(0.5)
+            time.sleep(0.05)
             raise ProviderError("MOCK_FORCED_FAILURE", "Prompt requested a forced mock failure.")
 
         if "[mock-timeout]" in prompt:
-            time.sleep(2.0)
+            time.sleep(self.config.mock_timeout_seconds)
             raise ProviderError("MOCK_TIMEOUT", "Prompt requested a simulated mock timeout.")
 
         self._validate_image(Path(task.image_path))
-        self._generate_video(Path(task.image_path), video_path, task.duration_seconds)
+        self._generate_video(
+            image_path=Path(task.image_path),
+            video_path=video_path,
+            duration_seconds=task.duration_seconds,
+            aspect_ratio=task.aspect_ratio,
+        )
         probe = self._probe_video(video_path)
+        completed_at = now_iso()
 
         result = {
             "task_id": task.id,
             "provider": self.name,
             "provider_task_id": f"mock-{task.id}",
-            "status": "succeeded",
+            "status": TaskStatus.SUCCEEDED.value,
             "video_path": str(video_path),
             "duration_seconds": task.duration_seconds,
             "aspect_ratio": task.aspect_ratio,
+            "requested_at": requested_at,
+            "completed_at": completed_at,
             "ffprobe": probe,
         }
         self._write_json(result_path, result)
@@ -72,8 +128,20 @@ class MockVideoProvider(VideoProvider):
         except Exception as exc:
             raise ProviderError("INVALID_IMAGE", f"Invalid first-frame image: {exc}") from exc
 
-    def _generate_video(self, image_path: Path, video_path: Path, duration_seconds: int) -> None:
+    def _generate_video(
+        self,
+        image_path: Path,
+        video_path: Path,
+        duration_seconds: int,
+        aspect_ratio: str,
+    ) -> None:
+        width, height = TARGET_DIMENSIONS[aspect_ratio]
         video_path.parent.mkdir(parents=True, exist_ok=True)
+        vf = (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+            "format=yuv420p"
+        )
         cmd = [
             self.config.ffmpeg_path,
             "-y",
@@ -86,7 +154,7 @@ class MockVideoProvider(VideoProvider):
             "-r",
             "24",
             "-vf",
-            "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+            vf,
             "-c:v",
             "libx264",
             "-pix_fmt",
