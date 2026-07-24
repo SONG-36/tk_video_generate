@@ -18,6 +18,10 @@ class AppConfig:
     ffprobe_path: str = "ffprobe"
     max_tasks_per_batch: int = 10
     max_worker_threads: int = 5
+    max_prompt_chars: int = 5000
+    max_image_bytes: int = 15 * 1024 * 1024
+    max_retry_count: int = 2
+    mock_timeout_seconds: float = 0.2
 
     def __post_init__(self) -> None:
         if self.ffmpeg_path == "ffmpeg":

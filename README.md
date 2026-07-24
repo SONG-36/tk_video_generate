@@ -25,12 +25,14 @@ environment checks.
 6. Set concurrency from `1` to `5`; the default is `3`.
 7. Enter the displayed confirmation text exactly, then submit the batch.
 8. Confirm that queued tasks move to running and then complete or fail.
-9. Use `[mock-fail]` in a prompt to force `MOCK_FORCED_FAILURE`.
-10. Use `[mock-timeout]` in a prompt to simulate a delayed timeout failure.
-11. Refresh the page and confirm batches, tasks, video previews, and downloads
+9. Successful tasks finish as `SUCCEEDED`.
+10. Use `[mock-fail]` in a prompt to force `MOCK_FORCED_FAILURE`.
+11. Use `[mock-timeout]` in a prompt to simulate a delayed timeout failure.
+12. Refresh the page and confirm batches, tasks, video previews, and downloads
     are still available.
-12. Retry a failed task and confirm its retry count increases.
-13. Download a single MP4, `request.json`, `result.json`, and the batch ZIP.
+13. Retry a failed task and confirm its retry count increases. V0.1 does not
+    support editing task prompts, so deterministic mock failures fail again.
+14. Download a single MP4, `request.json`, `result.json`, and the batch ZIP.
 
 ## CLI Verification
 
@@ -42,7 +44,7 @@ python scripts/manual_mock_validation.py
 
 The manual validation script creates a three-task mock batch:
 
-- normal prompt: succeeds with a playable MP4
+- normal prompt: succeeds with a playable 9:16 MP4 at 540x960
 - `[mock-fail]`: fails with `MOCK_FORCED_FAILURE`
 - `[mock-timeout]`: waits briefly and fails with `MOCK_TIMEOUT`
 

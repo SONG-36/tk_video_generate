@@ -6,6 +6,7 @@ import streamlit as st
 
 from tk_video_generate.config import AppConfig
 from tk_video_generate.enums import TaskStatus
+from tk_video_generate.repositories.sqlite_repository import RetryNotAllowedError
 from tk_video_generate.services.workbench_service import WorkbenchService
 
 
@@ -35,6 +36,7 @@ def render_create_batch(service: WorkbenchService) -> None:
             "First-frame images",
             type=["png", "jpg", "jpeg"],
             accept_multiple_files=True,
+            key=f"uploads-{batch_id}",
         )
         prompt_text = st.text_area(
             "Prompts, one line per image",
@@ -54,7 +56,7 @@ def render_create_batch(service: WorkbenchService) -> None:
             f"Valid tasks: {valid_task_count}. Max allowed: 10. "
             f"Estimated mock cost: ${expected_cost:.2f}. Confirmation: `{confirmation_text}`"
         )
-        confirmation = st.text_input("Confirmation text")
+        confirmation = st.text_input("Confirmation text", key=f"confirmation-{batch_id}")
         submitted = st.form_submit_button("Submit confirmed batch")
 
     if not submitted:
@@ -86,7 +88,7 @@ def render_task_actions(service: WorkbenchService, task_id: str, status: TaskSta
     if task is None:
         return
 
-    if status is TaskStatus.COMPLETED and task.output_video_path:
+    if status is TaskStatus.SUCCEEDED and task.output_video_path:
         video_path = Path(task.output_video_path)
         if video_path.exists():
             st.video(str(video_path))
@@ -121,8 +123,11 @@ def render_task_actions(service: WorkbenchService, task_id: str, status: TaskSta
             )
     with columns[2]:
         if status is TaskStatus.FAILED and st.button("Retry", key=f"retry-{task.id}"):
-            service.retry_task(task.id)
-            st.rerun()
+            try:
+                service.retry_task(task.id)
+                st.rerun()
+            except RetryNotAllowedError as exc:
+                st.error(str(exc))
 
 
 def render_batches(service: WorkbenchService) -> None:
@@ -134,14 +139,14 @@ def render_batches(service: WorkbenchService) -> None:
 
     for batch in batches:
         tasks = service.list_tasks(batch.id)
-        completed = sum(task.status is TaskStatus.COMPLETED for task in tasks)
+        succeeded = sum(task.status is TaskStatus.SUCCEEDED for task in tasks)
         failed = sum(task.status is TaskStatus.FAILED for task in tasks)
         running = sum(task.status is TaskStatus.RUNNING for task in tasks)
         queued = sum(task.status is TaskStatus.QUEUED for task in tasks)
 
         title = (
-            f"{batch.name} - {completed} completed, {failed} failed, "
-            f"{running} running, {queued} queued"
+            f"{batch.name} - {batch.status.value} - {succeeded} succeeded, "
+            f"{failed} failed, {running} running, {queued} queued"
         )
         with st.expander(title, expanded=True):
             zip_path = service.create_batch_zip(batch.id)
@@ -155,16 +160,19 @@ def render_batches(service: WorkbenchService) -> None:
                 )
 
             for task in tasks:
-                status_label = task.status.value
-                st.subheader(f"{task.name} - {status_label}")
-                st.caption(
-                    f"Retries: {task.retry_count} | Progress: {task.progress}% | "
-                    f"Error: {task.error_code or '-'}"
-                )
-                st.code(task.prompt, language="text")
-                if task.error_message:
-                    st.warning(task.error_message)
-                render_task_actions(service, task.id, task.status)
+                try:
+                    status_label = task.status.value
+                    st.subheader(f"{task.name} - {status_label}")
+                    st.caption(
+                        f"Retries: {task.retry_count} | Progress: {task.progress}% | "
+                        f"Error: {task.error_code or '-'}"
+                    )
+                    st.code(task.prompt, language="text")
+                    if task.error_message:
+                        st.warning(task.error_message)
+                    render_task_actions(service, task.id, task.status)
+                except Exception as exc:
+                    st.error(f"Could not render {task.name}: {exc}")
 
 
 def main() -> None:

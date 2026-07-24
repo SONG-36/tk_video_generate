@@ -8,8 +8,16 @@ from pathlib import Path
 from PIL import Image
 
 from tk_video_generate.config import AppConfig
+from tk_video_generate.enums import TaskStatus
 from tk_video_generate.models import VideoTask
 from tk_video_generate.providers.base import ProviderError, VideoProvider
+from tk_video_generate.services.time import now_iso
+
+TARGET_DIMENSIONS = {
+    "9:16": (540, 960),
+    "1:1": (720, 720),
+    "16:9": (960, 540),
+}
 
 
 class MockVideoProvider(VideoProvider):
@@ -26,6 +34,7 @@ class MockVideoProvider(VideoProvider):
         request_path = output_dir / "request.json"
         result_path = output_dir / "result.json"
         video_path = output_dir / "result.mp4"
+        requested_at = now_iso()
 
         self._write_json(
             request_path,
@@ -37,29 +46,38 @@ class MockVideoProvider(VideoProvider):
                 "duration_seconds": task.duration_seconds,
                 "aspect_ratio": task.aspect_ratio,
                 "image_path": task.image_path,
+                "requested_at": requested_at,
             },
         )
 
         if "[mock-fail]" in prompt:
-            time.sleep(0.5)
+            time.sleep(0.05)
             raise ProviderError("MOCK_FORCED_FAILURE", "Prompt requested a forced mock failure.")
 
         if "[mock-timeout]" in prompt:
-            time.sleep(2.0)
+            time.sleep(self.config.mock_timeout_seconds)
             raise ProviderError("MOCK_TIMEOUT", "Prompt requested a simulated mock timeout.")
 
         self._validate_image(Path(task.image_path))
-        self._generate_video(Path(task.image_path), video_path, task.duration_seconds)
+        self._generate_video(
+            image_path=Path(task.image_path),
+            video_path=video_path,
+            duration_seconds=task.duration_seconds,
+            aspect_ratio=task.aspect_ratio,
+        )
         probe = self._probe_video(video_path)
+        completed_at = now_iso()
 
         result = {
             "task_id": task.id,
             "provider": self.name,
             "provider_task_id": f"mock-{task.id}",
-            "status": "succeeded",
+            "status": TaskStatus.SUCCEEDED.value,
             "video_path": str(video_path),
             "duration_seconds": task.duration_seconds,
             "aspect_ratio": task.aspect_ratio,
+            "requested_at": requested_at,
+            "completed_at": completed_at,
             "ffprobe": probe,
         }
         self._write_json(result_path, result)
@@ -72,8 +90,20 @@ class MockVideoProvider(VideoProvider):
         except Exception as exc:
             raise ProviderError("INVALID_IMAGE", f"Invalid first-frame image: {exc}") from exc
 
-    def _generate_video(self, image_path: Path, video_path: Path, duration_seconds: int) -> None:
+    def _generate_video(
+        self,
+        image_path: Path,
+        video_path: Path,
+        duration_seconds: int,
+        aspect_ratio: str,
+    ) -> None:
+        width, height = TARGET_DIMENSIONS[aspect_ratio]
         video_path.parent.mkdir(parents=True, exist_ok=True)
+        vf = (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+            "format=yuv420p"
+        )
         cmd = [
             self.config.ffmpeg_path,
             "-y",
@@ -86,7 +116,7 @@ class MockVideoProvider(VideoProvider):
             "-r",
             "24",
             "-vf",
-            "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+            vf,
             "-c:v",
             "libx264",
             "-pix_fmt",

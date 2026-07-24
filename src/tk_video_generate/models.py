@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tk_video_generate.enums import TaskStatus
+from tk_video_generate.enums import BatchStatus, TaskStatus
 
 
 @dataclass(frozen=True)
@@ -10,6 +10,7 @@ class VideoBatch:
     id: str
     name: str
     provider: str
+    status: BatchStatus
     concurrency_limit: int
     confirmation_text: str
     total_tasks: int

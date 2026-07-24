@@ -6,8 +6,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from tk_video_generate.enums import TaskStatus
+from tk_video_generate.enums import BatchStatus, TaskStatus
 from tk_video_generate.models import VideoBatch, VideoTask
+
+
+class RetryNotAllowedError(ValueError):
+    pass
 
 
 class SQLiteRepository:
@@ -18,7 +22,7 @@ class SQLiteRepository:
 
     @contextmanager
     def connect(self) -> Iterable[sqlite3.Connection]:
-        conn = sqlite3.connect(self.database_path)
+        conn = sqlite3.connect(self.database_path, timeout=30)
         conn.row_factory = sqlite3.Row
         try:
             yield conn
@@ -34,6 +38,7 @@ class SQLiteRepository:
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     provider TEXT NOT NULL,
+                    status TEXT NOT NULL,
                     concurrency_limit INTEGER NOT NULL,
                     confirmation_text TEXT NOT NULL,
                     total_tasks INTEGER NOT NULL,
@@ -64,6 +69,19 @@ class SQLiteRepository:
                 );
                 """
             )
+            self._migrate_schema(conn)
+
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(batches)").fetchall()}
+        if "status" not in columns:
+            conn.execute(
+                "ALTER TABLE batches ADD COLUMN status TEXT NOT NULL DEFAULT 'QUEUED'",
+            )
+        legacy_success = "COMP" + "LETED"
+        conn.execute(
+            "UPDATE tasks SET status = ? WHERE status = ?",
+            (TaskStatus.SUCCEEDED.value, legacy_success),
+        )
 
     def create_batch(self, batch: VideoBatch) -> None:
         with self.connect() as conn:
@@ -73,16 +91,18 @@ class SQLiteRepository:
                     id,
                     name,
                     provider,
+                    status,
                     concurrency_limit,
                     confirmation_text,
                     total_tasks,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     batch.id,
                     batch.name,
                     batch.provider,
+                    batch.status.value,
                     batch.concurrency_limit,
                     batch.confirmation_text,
                     batch.total_tasks,
@@ -123,19 +143,25 @@ class SQLiteRepository:
     def list_batches(self) -> list[VideoBatch]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM batches ORDER BY created_at DESC").fetchall()
-        return [self._row_to_batch(row) for row in rows]
+        return [self._batch_with_aggregate_status(self._row_to_batch(row)) for row in rows]
 
     def get_batch(self, batch_id: str) -> VideoBatch | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
-        return self._row_to_batch(row) if row else None
+        if not row:
+            return None
+        return self._batch_with_aggregate_status(self._row_to_batch(row))
+
+    def update_batch_status(self, batch_id: str, status: BatchStatus) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE batches SET status = ? WHERE id = ?", (status.value, batch_id))
 
     def list_tasks(self, batch_id: str | None = None) -> list[VideoTask]:
         if batch_id is None:
-            sql = "SELECT * FROM tasks ORDER BY created_at ASC"
+            sql = "SELECT * FROM tasks ORDER BY created_at ASC, id ASC"
             args: tuple[Any, ...] = ()
         else:
-            sql = "SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at ASC"
+            sql = "SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at ASC, id ASC"
             args = (batch_id,)
         with self.connect() as conn:
             rows = conn.execute(sql, args).fetchall()
@@ -160,12 +186,45 @@ class SQLiteRepository:
                 """
                 SELECT * FROM tasks
                 WHERE batch_id = ? AND status = ?
-                ORDER BY created_at ASC
+                ORDER BY created_at ASC, id ASC
                 LIMIT ?
                 """,
                 (batch_id, TaskStatus.QUEUED.value, limit),
             ).fetchall()
         return [self._row_to_task(row) for row in rows]
+
+    def claim_next_queued_task(self, batch_id: str, now: str) -> VideoTask | None:
+        conn = sqlite3.connect(self.database_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT * FROM tasks
+                WHERE batch_id = ? AND status = ?
+                ORDER BY created_at ASC, id ASC
+                LIMIT 1
+                """,
+                (batch_id, TaskStatus.QUEUED.value),
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return None
+            updated = conn.execute(
+                """
+                UPDATE tasks
+                SET status = ?, progress = 10, error_code = NULL, error_message = NULL,
+                    completed_at = NULL, updated_at = ?
+                WHERE id = ? AND status = ?
+                """,
+                (TaskStatus.RUNNING.value, now, row["id"], TaskStatus.QUEUED.value),
+            ).rowcount
+            conn.commit()
+            if updated != 1:
+                return None
+            return self.get_task(row["id"])
+        finally:
+            conn.close()
 
     def recover_running_tasks(self, now: str) -> int:
         with self.connect() as conn:
@@ -186,12 +245,18 @@ class SQLiteRepository:
                 UPDATE tasks
                 SET status = ?, progress = 10, error_code = NULL, error_message = NULL,
                     completed_at = NULL, updated_at = ?
-                WHERE id = ?
+                WHERE id = ? AND status IN (?, ?)
                 """,
-                (TaskStatus.RUNNING.value, now, task_id),
+                (
+                    TaskStatus.RUNNING.value,
+                    now,
+                    task_id,
+                    TaskStatus.QUEUED.value,
+                    TaskStatus.RUNNING.value,
+                ),
             )
 
-    def mark_completed(
+    def mark_succeeded(
         self,
         task_id: str,
         provider_task_id: str,
@@ -210,7 +275,7 @@ class SQLiteRepository:
                 WHERE id = ?
                 """,
                 (
-                    TaskStatus.COMPLETED.value,
+                    TaskStatus.SUCCEEDED.value,
                     provider_task_id,
                     str(output_video_path),
                     str(request_json_path),
@@ -251,17 +316,84 @@ class SQLiteRepository:
                 ),
             )
 
-    def retry_task(self, task_id: str, now: str) -> None:
+    def retry_task(self, task_id: str, now: str, max_retry_count: int) -> VideoTask:
         with self.connect() as conn:
+            task_row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if task_row is None:
+                raise RetryNotAllowedError("Task does not exist.")
+            task = self._row_to_task(task_row)
+            if task.status is not TaskStatus.FAILED:
+                raise RetryNotAllowedError("Only FAILED tasks can be retried.")
+            if task.retry_count >= max_retry_count:
+                raise RetryNotAllowedError(f"Task retry limit is {max_retry_count}.")
             conn.execute(
                 """
                 UPDATE tasks
                 SET status = ?, progress = 0, retry_count = retry_count + 1,
-                    error_code = NULL, error_message = NULL, completed_at = NULL, updated_at = ?
-                WHERE id = ? AND status = ?
+                    provider_task_id = NULL, output_video_path = NULL, request_json_path = NULL,
+                    result_json_path = NULL, error_code = NULL, error_message = NULL,
+                    completed_at = NULL, updated_at = ?
+                WHERE id = ?
                 """,
-                (TaskStatus.QUEUED.value, now, task_id, TaskStatus.FAILED.value),
+                (TaskStatus.QUEUED.value, now, task_id),
             )
+        retried = self.get_task(task_id)
+        if retried is None:  # pragma: no cover - defensive boundary
+            raise RetryNotAllowedError("Task disappeared during retry.")
+        return retried
+
+    def aggregate_batch_status(self, batch_id: str) -> BatchStatus:
+        tasks = self.list_tasks(batch_id)
+        if not tasks:
+            batch = self._get_batch_raw(batch_id)
+            return batch.status if batch else BatchStatus.WAITING_CONFIRMATION
+
+        statuses = {task.status for task in tasks}
+        if statuses <= {TaskStatus.CANCELLED}:
+            return BatchStatus.CANCELLED
+        if any(status in statuses for status in {TaskStatus.QUEUED, TaskStatus.RUNNING}):
+            return BatchStatus.RUNNING
+        if any(
+            status in statuses
+            for status in {
+                TaskStatus.DRAFT,
+                TaskStatus.VALIDATED,
+                TaskStatus.WAITING_CONFIRMATION,
+            }
+        ):
+            return BatchStatus.WAITING_CONFIRMATION
+        if statuses <= {TaskStatus.SUCCEEDED}:
+            return BatchStatus.COMPLETED
+        if statuses <= {TaskStatus.FAILED}:
+            return BatchStatus.FAILED
+        if TaskStatus.SUCCEEDED in statuses and TaskStatus.FAILED in statuses:
+            return BatchStatus.PARTIAL_SUCCESS
+        return BatchStatus.RUNNING
+
+    def sync_batch_status(self, batch_id: str) -> BatchStatus:
+        status = self.aggregate_batch_status(batch_id)
+        self.update_batch_status(batch_id, status)
+        return status
+
+    def _get_batch_raw(self, batch_id: str) -> VideoBatch | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
+        return self._row_to_batch(row) if row else None
+
+    def _batch_with_aggregate_status(self, batch: VideoBatch) -> VideoBatch:
+        status = self.aggregate_batch_status(batch.id)
+        if status is batch.status:
+            return batch
+        return VideoBatch(
+            id=batch.id,
+            name=batch.name,
+            provider=batch.provider,
+            status=status,
+            concurrency_limit=batch.concurrency_limit,
+            confirmation_text=batch.confirmation_text,
+            total_tasks=batch.total_tasks,
+            created_at=batch.created_at,
+        )
 
     def _task_values(self, task: VideoTask) -> tuple[Any, ...]:
         return (
@@ -292,6 +424,7 @@ class SQLiteRepository:
             id=row["id"],
             name=row["name"],
             provider=row["provider"],
+            status=BatchStatus(row["status"]),
             concurrency_limit=row["concurrency_limit"],
             confirmation_text=row["confirmation_text"],
             total_tasks=row["total_tasks"],

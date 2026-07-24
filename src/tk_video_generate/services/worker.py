@@ -28,6 +28,11 @@ class TaskWorker:
         self._active_task_ids: set[str] = set()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self.scan_errors: list[str] = []
+
+    @property
+    def scan_thread(self) -> threading.Thread | None:
+        return self._thread
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -44,7 +49,10 @@ class TaskWorker:
 
     def _run_loop(self) -> None:
         while not self._stop_event.is_set():
-            self._schedule_available_tasks()
+            try:
+                self._schedule_available_tasks()
+            except Exception as exc:  # pragma: no cover - defensive worker boundary
+                self.scan_errors.append(str(exc))
             self._stop_event.wait(0.5)
 
     def _schedule_available_tasks(self) -> None:
@@ -52,9 +60,10 @@ class TaskWorker:
         for batch in batches:
             running = self.repository.count_running_for_batch(batch.id)
             available = max(batch.concurrency_limit - running, 0)
-            if available == 0:
-                continue
-            for task in self.repository.queued_tasks_for_batch(batch.id, available):
+            for _ in range(available):
+                task = self.repository.claim_next_queued_task(batch.id, now_iso())
+                if task is None:
+                    break
                 self._submit_task(task)
 
     def _submit_task(self, task: VideoTask) -> None:
@@ -76,16 +85,11 @@ class TaskWorker:
         output_dir = self.config.outputs_dir / task.batch_id / task.id
         request_path = output_dir / "request.json"
         result_path = output_dir / "result.json"
-        self.repository.mark_running(task.id, now_iso())
-
-        task = self.repository.get_task(task_id)
-        if task is None:
-            return
 
         try:
-            time.sleep(0.2)
+            time.sleep(0.05)
             result = self.provider.generate(task, output_dir)
-            self.repository.mark_completed(
+            self.repository.mark_succeeded(
                 task_id=task.id,
                 provider_task_id=str(result["provider_task_id"]),
                 output_video_path=Path(str(result["video_path"])),
@@ -103,7 +107,7 @@ class TaskWorker:
                 result_path,
                 now_iso(),
             )
-        except Exception as exc:  # pragma: no cover - defensive boundary
+        except Exception as exc:  # pragma: no cover - defensive task boundary
             self._write_failure_result(result_path, task, "UNEXPECTED_ERROR", str(exc))
             self.repository.mark_failed(
                 task.id,
@@ -113,6 +117,8 @@ class TaskWorker:
                 result_path,
                 now_iso(),
             )
+        finally:
+            self.repository.sync_batch_status(task.batch_id)
 
     def _write_failure_result(
         self,
@@ -127,9 +133,10 @@ class TaskWorker:
                 {
                     "task_id": task.id,
                     "provider": self.provider.name,
-                    "status": "failed",
+                    "status": "FAILED",
                     "error_code": error_code,
                     "error_message": error_message,
+                    "completed_at": now_iso(),
                 },
                 ensure_ascii=True,
                 indent=2,
