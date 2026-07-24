@@ -78,7 +78,7 @@ def test_same_task_can_only_be_atomically_claimed_once(app_config, sample_image)
 
     claimed = [task for task in results if task is not None]
     assert len(claimed) == 1
-    assert service.get_task(claimed[0].id).status is TaskStatus.RUNNING
+    assert service.get_task(claimed[0].id).status is TaskStatus.SUBMITTING
 
 
 def test_batch_status_aggregation(app_config, sample_image) -> None:

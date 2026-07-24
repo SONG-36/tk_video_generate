@@ -156,6 +156,11 @@ class RecordingProvider(MockVideoProvider):
             with self.lock:
                 self.active -= 1
 
+    def submit(self, task, output_dir):
+        if self.fail_prompt and self.fail_prompt in task.prompt:
+            raise RuntimeError("unexpected provider error")
+        return super().submit(task, output_dir)
+
 
 def test_two_workers_do_not_execute_same_task_twice(app_config, sample_image) -> None:
     service = WorkbenchService(app_config)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -10,7 +11,12 @@ from PIL import Image
 from tk_video_generate.config import AppConfig
 from tk_video_generate.enums import TaskStatus
 from tk_video_generate.models import VideoTask
-from tk_video_generate.providers.base import ProviderError, VideoProvider
+from tk_video_generate.providers.base import (
+    ProviderError,
+    ProviderPollResult,
+    ProviderSubmission,
+    VideoProvider,
+)
 from tk_video_generate.services.time import now_iso
 
 TARGET_DIMENSIONS = {
@@ -26,8 +32,40 @@ class MockVideoProvider(VideoProvider):
     def __init__(self, config: AppConfig) -> None:
         self.config = config
 
-    def estimate_cost(self, task_count: int, duration_seconds: int) -> float:
+    def estimate_batch_cost(self, task_count: int, duration_seconds: int) -> float:
         return round(task_count * duration_seconds * 0.01, 2)
+
+    def validate(self, task: VideoTask) -> None:
+        self._validate_image(Path(task.image_path))
+
+    def estimate_cost(self, task: VideoTask) -> float:
+        return round(task.duration_seconds * 0.01, 2)
+
+    def submit(self, task: VideoTask, output_dir: Path) -> ProviderSubmission:
+        result = self.generate(task, output_dir)
+        return ProviderSubmission(
+            provider_task_id=str(result["provider_task_id"]),
+            raw_response=result,
+        )
+
+    def poll(self, provider_task_id: str) -> ProviderPollResult:
+        return ProviderPollResult(
+            status="succeeded",
+            progress=100,
+            result_url=f"mock://{provider_task_id}/result.mp4",
+            error_code=None,
+            error_message=None,
+            raw_response={"provider_task_id": provider_task_id, "status": "succeeded"},
+        )
+
+    def download(self, result_url: str, output_path: Path) -> Path:
+        source = output_path.parent / "result.mp4"
+        if source.resolve() != output_path.resolve() and source.exists():
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, output_path)
+        if not output_path.exists():
+            raise ProviderError("RESULT_DOWNLOAD_FAILED", "Mock result file is missing.")
+        return output_path
 
     def generate(self, task: VideoTask, output_dir: Path) -> dict[str, object]:
         prompt = task.prompt.lower()

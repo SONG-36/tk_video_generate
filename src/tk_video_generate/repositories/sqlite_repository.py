@@ -52,19 +52,32 @@ class SQLiteRepository:
                     image_path TEXT NOT NULL,
                     prompt TEXT NOT NULL,
                     provider TEXT NOT NULL,
+                    model TEXT,
                     duration_seconds INTEGER NOT NULL,
                     aspect_ratio TEXT NOT NULL,
                     status TEXT NOT NULL,
                     progress INTEGER NOT NULL,
                     provider_task_id TEXT,
+                    provider_status TEXT,
+                    result_url TEXT,
+                    estimated_cost REAL,
+                    actual_cost REAL,
                     output_video_path TEXT,
                     request_json_path TEXT,
                     result_json_path TEXT,
+                    provider_response_path TEXT,
+                    provider_request_path TEXT,
+                    provider_error_payload_path TEXT,
                     retry_count INTEGER NOT NULL DEFAULT 0,
                     error_code TEXT,
                     error_message TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    submitted_at TEXT,
+                    last_polled_at TEXT,
+                    next_poll_at TEXT,
+                    poll_count INTEGER NOT NULL DEFAULT 0,
+                    download_started_at TEXT,
                     completed_at TEXT
                 );
                 """
@@ -82,6 +95,25 @@ class SQLiteRepository:
             "UPDATE tasks SET status = ? WHERE status = ?",
             (TaskStatus.SUCCEEDED.value, legacy_success),
         )
+        task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+        task_migrations = {
+            "model": "TEXT",
+            "provider_status": "TEXT",
+            "result_url": "TEXT",
+            "estimated_cost": "REAL",
+            "actual_cost": "REAL",
+            "provider_response_path": "TEXT",
+            "provider_request_path": "TEXT",
+            "provider_error_payload_path": "TEXT",
+            "submitted_at": "TEXT",
+            "last_polled_at": "TEXT",
+            "next_poll_at": "TEXT",
+            "poll_count": "INTEGER NOT NULL DEFAULT 0",
+            "download_started_at": "TEXT",
+        }
+        for column, definition in task_migrations.items():
+            if column not in task_columns:
+                conn.execute(f"ALTER TABLE tasks ADD COLUMN {column} {definition}")
 
     def create_batch(self, batch: VideoBatch) -> None:
         with self.connect() as conn:
@@ -121,21 +153,37 @@ class SQLiteRepository:
                     image_path,
                     prompt,
                     provider,
+                    model,
                     duration_seconds,
                     aspect_ratio,
                     status,
                     progress,
                     provider_task_id,
+                    provider_status,
+                    result_url,
+                    estimated_cost,
+                    actual_cost,
                     output_video_path,
                     request_json_path,
                     result_json_path,
+                    provider_response_path,
+                    provider_request_path,
+                    provider_error_payload_path,
                     retry_count,
                     error_code,
                     error_message,
                     created_at,
                     updated_at,
+                    submitted_at,
+                    last_polled_at,
+                    next_poll_at,
+                    poll_count,
+                    download_started_at,
                     completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?
+                )
                 """,
                 [self._task_values(task) for task in tasks],
             )
@@ -175,8 +223,18 @@ class SQLiteRepository:
     def count_running_for_batch(self, batch_id: str) -> int:
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS total FROM tasks WHERE batch_id = ? AND status = ?",
-                (batch_id, TaskStatus.RUNNING.value),
+                """
+                SELECT COUNT(*) AS total FROM tasks
+                WHERE batch_id = ? AND status IN (?, ?, ?, ?, ?)
+                """,
+                (
+                    batch_id,
+                    TaskStatus.RUNNING.value,
+                    TaskStatus.SUBMITTING.value,
+                    TaskStatus.SUBMITTED.value,
+                    TaskStatus.POLLING.value,
+                    TaskStatus.DOWNLOADING.value,
+                ),
             ).fetchone()
         return int(row["total"])
 
@@ -213,11 +271,11 @@ class SQLiteRepository:
             updated = conn.execute(
                 """
                 UPDATE tasks
-                SET status = ?, progress = 10, error_code = NULL, error_message = NULL,
+                SET status = ?, progress = 5, error_code = NULL, error_message = NULL,
                     completed_at = NULL, updated_at = ?
                 WHERE id = ? AND status = ?
                 """,
-                (TaskStatus.RUNNING.value, now, row["id"], TaskStatus.QUEUED.value),
+                (TaskStatus.SUBMITTING.value, now, row["id"], TaskStatus.QUEUED.value),
             ).rowcount
             conn.commit()
             if updated != 1:
@@ -232,9 +290,43 @@ class SQLiteRepository:
                 """
                 UPDATE tasks
                 SET status = ?, progress = 0, updated_at = ?
-                WHERE status = ?
+                WHERE status IN (?, ?)
                 """,
-                (TaskStatus.QUEUED.value, now, TaskStatus.RUNNING.value),
+                (
+                    TaskStatus.QUEUED.value,
+                    now,
+                    TaskStatus.RUNNING.value,
+                    TaskStatus.SUBMITTING.value,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE tasks
+                SET status = ?, updated_at = ?
+                WHERE provider_task_id IS NOT NULL AND status IN (?, ?, ?)
+                """,
+                (
+                    TaskStatus.POLLING.value,
+                    now,
+                    TaskStatus.SUBMITTED.value,
+                    TaskStatus.POLLING.value,
+                    TaskStatus.DOWNLOADING.value,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE tasks
+                SET status = ?, error_code = ?, error_message = ?, completed_at = ?, updated_at = ?
+                WHERE provider_task_id IS NULL AND status = ?
+                """,
+                (
+                    TaskStatus.FAILED.value,
+                    "SUBMISSION_STATE_UNCERTAIN",
+                    "Submission may have reached provider before local task id was saved.",
+                    now,
+                    now,
+                    TaskStatus.SUBMITTING.value,
+                ),
             )
         return cursor.rowcount
 
@@ -256,6 +348,108 @@ class SQLiteRepository:
                 ),
             )
 
+    def mark_submitted(
+        self,
+        task_id: str,
+        provider_task_id: str,
+        provider_response_path: Path,
+        provider_request_path: Path,
+        now: str,
+        next_poll_at: str,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE tasks
+                SET status = ?, provider_task_id = ?, provider_response_path = ?,
+                    provider_request_path = ?, provider_status = ?, submitted_at = ?,
+                    next_poll_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    TaskStatus.SUBMITTED.value,
+                    provider_task_id,
+                    str(provider_response_path),
+                    str(provider_request_path),
+                    "submitted",
+                    now,
+                    next_poll_at,
+                    now,
+                    task_id,
+                ),
+            )
+
+    def list_pollable_tasks(self, now: str) -> list[VideoTask]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM tasks
+                WHERE provider_task_id IS NOT NULL
+                  AND status IN (?, ?)
+                  AND (next_poll_at IS NULL OR next_poll_at <= ?)
+                ORDER BY updated_at ASC, id ASC
+                """,
+                (TaskStatus.SUBMITTED.value, TaskStatus.POLLING.value, now),
+            ).fetchall()
+        return [self._row_to_task(row) for row in rows]
+
+    def mark_polling(
+        self,
+        task_id: str,
+        provider_status: str,
+        progress: int | None,
+        provider_response_path: Path,
+        now: str,
+        next_poll_at: str | None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE tasks
+                SET status = ?, provider_status = ?, progress = COALESCE(?, progress),
+                    provider_response_path = ?, last_polled_at = ?,
+                    next_poll_at = ?, poll_count = poll_count + 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    TaskStatus.POLLING.value,
+                    provider_status,
+                    progress,
+                    str(provider_response_path),
+                    now,
+                    next_poll_at,
+                    now,
+                    task_id,
+                ),
+            )
+
+    def mark_downloading(
+        self,
+        task_id: str,
+        result_url: str,
+        provider_status: str,
+        provider_response_path: Path,
+        now: str,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE tasks
+                SET status = ?, provider_status = ?, result_url = ?,
+                    provider_response_path = ?, download_started_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    TaskStatus.DOWNLOADING.value,
+                    provider_status,
+                    result_url,
+                    str(provider_response_path),
+                    now,
+                    now,
+                    task_id,
+                ),
+            )
+
     def mark_succeeded(
         self,
         task_id: str,
@@ -271,7 +465,7 @@ class SQLiteRepository:
                 UPDATE tasks
                 SET status = ?, progress = 100, provider_task_id = ?, output_video_path = ?,
                     request_json_path = ?, result_json_path = ?, error_code = NULL,
-                    error_message = NULL, completed_at = ?, updated_at = ?
+                    error_message = NULL, provider_status = ?, completed_at = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -280,6 +474,7 @@ class SQLiteRepository:
                     str(output_video_path),
                     str(request_json_path),
                     str(result_json_path),
+                    TaskStatus.SUCCEEDED.value,
                     now,
                     now,
                     task_id,
@@ -294,13 +489,16 @@ class SQLiteRepository:
         request_json_path: Path | None,
         result_json_path: Path | None,
         now: str,
+        provider_error_payload_path: Path | None = None,
     ) -> None:
         with self.connect() as conn:
             conn.execute(
                 """
                 UPDATE tasks
                 SET status = ?, progress = 100, request_json_path = COALESCE(?, request_json_path),
-                    result_json_path = COALESCE(?, result_json_path), error_code = ?,
+                    result_json_path = COALESCE(?, result_json_path),
+                    provider_error_payload_path = COALESCE(?, provider_error_payload_path),
+                    error_code = ?,
                     error_message = ?, completed_at = ?, updated_at = ?
                 WHERE id = ?
                 """,
@@ -308,6 +506,7 @@ class SQLiteRepository:
                     TaskStatus.FAILED.value,
                     str(request_json_path) if request_json_path else None,
                     str(result_json_path) if result_json_path else None,
+                    str(provider_error_payload_path) if provider_error_payload_path else None,
                     error_code,
                     error_message,
                     now,
@@ -330,8 +529,12 @@ class SQLiteRepository:
                 """
                 UPDATE tasks
                 SET status = ?, progress = 0, retry_count = retry_count + 1,
-                    provider_task_id = NULL, output_video_path = NULL, request_json_path = NULL,
-                    result_json_path = NULL, error_code = NULL, error_message = NULL,
+                    provider_task_id = NULL, provider_status = NULL, result_url = NULL,
+                    output_video_path = NULL, request_json_path = NULL, result_json_path = NULL,
+                    provider_response_path = NULL, provider_request_path = NULL,
+                    provider_error_payload_path = NULL, error_code = NULL, error_message = NULL,
+                    submitted_at = NULL, last_polled_at = NULL, next_poll_at = NULL,
+                    poll_count = 0, download_started_at = NULL,
                     completed_at = NULL, updated_at = ?
                 WHERE id = ?
                 """,
@@ -351,7 +554,15 @@ class SQLiteRepository:
         statuses = {task.status for task in tasks}
         if statuses <= {TaskStatus.CANCELLED}:
             return BatchStatus.CANCELLED
-        if any(status in statuses for status in {TaskStatus.QUEUED, TaskStatus.RUNNING}):
+        active_statuses = {
+            TaskStatus.QUEUED,
+            TaskStatus.RUNNING,
+            TaskStatus.SUBMITTING,
+            TaskStatus.SUBMITTED,
+            TaskStatus.POLLING,
+            TaskStatus.DOWNLOADING,
+        }
+        if any(status in statuses for status in active_statuses):
             return BatchStatus.RUNNING
         if any(
             status in statuses
@@ -403,19 +614,32 @@ class SQLiteRepository:
             task.image_path,
             task.prompt,
             task.provider,
+            task.model,
             task.duration_seconds,
             task.aspect_ratio,
             task.status.value,
             task.progress,
             task.provider_task_id,
+            task.provider_status,
+            task.result_url,
+            task.estimated_cost,
+            task.actual_cost,
             task.output_video_path,
             task.request_json_path,
             task.result_json_path,
+            task.provider_response_path,
+            task.provider_request_path,
+            task.provider_error_payload_path,
             task.retry_count,
             task.error_code,
             task.error_message,
             task.created_at,
             task.updated_at,
+            task.submitted_at,
+            task.last_polled_at,
+            task.next_poll_at,
+            task.poll_count,
+            task.download_started_at,
             task.completed_at,
         )
 
@@ -439,18 +663,31 @@ class SQLiteRepository:
             image_path=row["image_path"],
             prompt=row["prompt"],
             provider=row["provider"],
+            model=row["model"],
             duration_seconds=row["duration_seconds"],
             aspect_ratio=row["aspect_ratio"],
             status=TaskStatus(row["status"]),
             progress=row["progress"],
             provider_task_id=row["provider_task_id"],
+            provider_status=row["provider_status"],
+            result_url=row["result_url"],
+            estimated_cost=row["estimated_cost"],
+            actual_cost=row["actual_cost"],
             output_video_path=row["output_video_path"],
             request_json_path=row["request_json_path"],
             result_json_path=row["result_json_path"],
+            provider_response_path=row["provider_response_path"],
+            provider_request_path=row["provider_request_path"],
+            provider_error_payload_path=row["provider_error_payload_path"],
             retry_count=row["retry_count"],
             error_code=row["error_code"],
             error_message=row["error_message"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            submitted_at=row["submitted_at"],
+            last_polled_at=row["last_polled_at"],
+            next_poll_at=row["next_poll_at"],
+            poll_count=row["poll_count"],
+            download_started_at=row["download_started_at"],
             completed_at=row["completed_at"],
         )

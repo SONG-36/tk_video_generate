@@ -14,7 +14,7 @@ from PIL import Image, UnidentifiedImageError
 from tk_video_generate.config import AppConfig
 from tk_video_generate.enums import BatchStatus, TaskStatus
 from tk_video_generate.models import VideoBatch, VideoTask
-from tk_video_generate.providers.mock_provider import MockVideoProvider
+from tk_video_generate.providers.factory import create_provider
 from tk_video_generate.repositories.sqlite_repository import RetryNotAllowedError, SQLiteRepository
 from tk_video_generate.services.time import now_iso
 from tk_video_generate.services.worker import TaskWorker
@@ -27,8 +27,8 @@ class WorkbenchService:
         self.config = config
         self.config.ensure_directories()
         self.repository = SQLiteRepository(config.database_path)
-        self.provider = MockVideoProvider(config)
-        self.worker = TaskWorker(config, self.repository, self.provider)
+        self.provider = create_provider("mock", config)
+        self.worker = TaskWorker(config, self.repository)
         self.repository.recover_running_tasks(now_iso())
 
     def start_worker(self) -> None:
@@ -40,8 +40,14 @@ class WorkbenchService:
     def new_batch_id(self) -> str:
         return "BATCH_" + datetime.now(UTC).strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6]
 
-    def estimate_batch_cost(self, task_count: int, duration_seconds: int) -> float:
-        return self.provider.estimate_cost(task_count, duration_seconds)
+    def estimate_batch_cost(
+        self,
+        task_count: int,
+        duration_seconds: int,
+        provider_name: str = "mock",
+    ) -> float | None:
+        provider = create_provider(provider_name, self.config)
+        return provider.estimate_batch_cost(task_count, duration_seconds)
 
     def create_confirmed_batch(
         self,
@@ -54,6 +60,9 @@ class WorkbenchService:
         concurrency_limit: int,
         confirmation: str,
         expected_confirmation: str,
+        provider_name: str = "mock",
+        real_api_confirmed: bool = False,
+        maximum_cost_usd: float | None = None,
     ) -> VideoBatch:
         if confirmation.strip() != expected_confirmation:
             raise ValueError(f"Enter confirmation text exactly: {expected_confirmation}")
@@ -61,6 +70,7 @@ class WorkbenchService:
         self._validate_batch_id(batch_id)
         if self.repository.get_batch(batch_id) is not None:
             raise ValueError(f"Batch {batch_id} already exists.")
+        provider = create_provider(provider_name, self.config)
         self._validate_batch_inputs(
             uploaded_files=uploaded_files,
             prompts=prompts,
@@ -68,12 +78,20 @@ class WorkbenchService:
             aspect_ratio=aspect_ratio,
             concurrency_limit=concurrency_limit,
         )
+        if provider_name != "mock":
+            self._validate_real_submission(
+                uploaded_files=uploaded_files,
+                concurrency_limit=concurrency_limit,
+                real_api_confirmed=real_api_confirmed,
+                maximum_cost_usd=maximum_cost_usd,
+                expected_confirmation=expected_confirmation,
+            )
 
         now = now_iso()
         batch = VideoBatch(
             id=batch_id,
             name=batch_name,
-            provider=self.provider.name,
+            provider=provider.name,
             status=BatchStatus.QUEUED,
             concurrency_limit=concurrency_limit,
             confirmation_text=expected_confirmation,
@@ -93,7 +111,8 @@ class WorkbenchService:
                     name=f"Task {index:03d}",
                     image_path=str(image_path),
                     prompt=prompt.strip(),
-                    provider=self.provider.name,
+                    provider=provider.name,
+                    model=self.config.seedance_model if provider.name != "mock" else None,
                     duration_seconds=duration_seconds,
                     aspect_ratio=aspect_ratio,
                     status=TaskStatus.QUEUED,
@@ -108,6 +127,7 @@ class WorkbenchService:
                     created_at=now,
                     updated_at=now,
                     completed_at=None,
+                    estimated_cost=None,
                 )
             )
 
@@ -124,9 +144,12 @@ class WorkbenchService:
         duration_seconds: int,
         aspect_ratio: str,
         concurrency_limit: int,
+        provider_name: str = "mock",
     ) -> VideoBatch:
         uploads = [PathUpload(path) for path in image_paths]
         try:
+            is_real = provider_name != "mock"
+            expected_confirmation = f"CONFIRM REAL {batch_id}" if is_real else f"CONFIRM {batch_id}"
             return self.create_confirmed_batch(
                 batch_id=batch_id,
                 batch_name=batch_name,
@@ -135,8 +158,11 @@ class WorkbenchService:
                 duration_seconds=duration_seconds,
                 aspect_ratio=aspect_ratio,
                 concurrency_limit=concurrency_limit,
-                confirmation=f"CONFIRM {batch_id}",
-                expected_confirmation=f"CONFIRM {batch_id}",
+                confirmation=expected_confirmation,
+                expected_confirmation=expected_confirmation,
+                provider_name=provider_name,
+                real_api_confirmed=True,
+                maximum_cost_usd=self.config.real_video_max_cost_usd,
             )
         finally:
             for upload in uploads:
@@ -158,7 +184,13 @@ class WorkbenchService:
         return self.repository.get_task(task_id)
 
     def retry_task(self, task_id: str) -> VideoTask:
+        task = self.repository.get_task(task_id)
+        if task and task.provider != "mock":
+            raise RetryNotAllowedError("Real provider tasks cannot be retried automatically.")
         return self.repository.retry_task(task_id, now_iso(), self.config.max_retry_count)
+
+    def refresh_task_status(self, task_id: str) -> None:
+        self.worker.process_poll_once(task_id)
 
     def create_batch_zip(self, batch_id: str) -> Path | None:
         batch = self.repository.get_batch(batch_id)
@@ -220,6 +252,28 @@ class WorkbenchService:
             size = self._uploaded_size(uploaded_file)
             if size > self.config.max_image_bytes:
                 raise ValueError("Image must be 15 MB or smaller.")
+
+    def _validate_real_submission(
+        self,
+        uploaded_files: list[BinaryIO],
+        concurrency_limit: int,
+        real_api_confirmed: bool,
+        maximum_cost_usd: float | None,
+        expected_confirmation: str,
+    ) -> None:
+        if len(uploaded_files) != self.config.real_video_max_tasks:
+            raise ValueError("Seedance mode allows exactly one task.")
+        if concurrency_limit != self.config.real_video_max_concurrency:
+            raise ValueError("Seedance mode requires concurrency 1.")
+        if not expected_confirmation.startswith("CONFIRM REAL "):
+            raise ValueError("Seedance mode requires CONFIRM REAL <batch_id>.")
+        if not real_api_confirmed:
+            raise ValueError("Paid API confirmation checkbox is required.")
+        self.config.validate_seedance_config()
+        if maximum_cost_usd is None:
+            raise ValueError("Maximum allowed cost is required for real provider mode.")
+        if maximum_cost_usd > self.config.real_video_max_cost_usd:
+            raise ValueError("Maximum allowed cost exceeds configured safety ceiling.")
 
     def _validate_batch_id(self, batch_id: str) -> None:
         if not batch_id or not SAFE_ID_RE.fullmatch(batch_id):

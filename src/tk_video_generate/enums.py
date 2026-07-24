@@ -8,10 +8,19 @@ class TaskStatus(StrEnum):
     VALIDATED = "VALIDATED"
     WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
     QUEUED = "QUEUED"
+    SUBMITTING = "SUBMITTING"
+    SUBMITTED = "SUBMITTED"
     RUNNING = "RUNNING"
+    POLLING = "POLLING"
+    DOWNLOADING = "DOWNLOADING"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+
+
+class ProviderName(StrEnum):
+    MOCK = "mock"
+    BYTEPLUS_SEEDANCE = "byteplus_seedance"
 
 
 class BatchStatus(StrEnum):

@@ -9,6 +9,7 @@ description = "Mock batch video generation workbench prototype."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "httpx>=0.28",
   "pillow>=11.0",
   "streamlit>=1.41",
 ]
