@@ -29,7 +29,6 @@ class AppConfig:
     seedance_api_key: str | None = None
     seedance_base_url: str = "https://ark.ap-southeast.bytepluses.com/api/v3"
     seedance_model: str | None = None
-    seedance_image_url: str | None = None
     seedance_poll_interval_seconds: int = 10
     seedance_request_timeout_seconds: int = 30
     seedance_max_poll_minutes: int = 30
@@ -68,7 +67,6 @@ class AppConfig:
                 "https://ark.ap-southeast.bytepluses.com/api/v3",
             ),
             seedance_model=os.getenv("SEEDANCE_MODEL") or None,
-            seedance_image_url=os.getenv("SEEDANCE_IMAGE_URL") or None,
             seedance_poll_interval_seconds=int(
                 os.getenv("SEEDANCE_POLL_INTERVAL_SECONDS", "10")
             ),

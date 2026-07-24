@@ -8,6 +8,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO
+from urllib.parse import urlparse
 
 from PIL import Image, UnidentifiedImageError
 
@@ -63,6 +64,7 @@ class WorkbenchService:
         provider_name: str = "mock",
         real_api_confirmed: bool = False,
         maximum_cost_usd: float | None = None,
+        image_urls: list[str | None] | None = None,
     ) -> VideoBatch:
         if confirmation.strip() != expected_confirmation:
             raise ValueError(f"Enter confirmation text exactly: {expected_confirmation}")
@@ -81,6 +83,7 @@ class WorkbenchService:
         if provider_name != "mock":
             self._validate_real_submission(
                 uploaded_files=uploaded_files,
+                image_urls=image_urls,
                 concurrency_limit=concurrency_limit,
                 real_api_confirmed=real_api_confirmed,
                 maximum_cost_usd=maximum_cost_usd,
@@ -104,12 +107,16 @@ class WorkbenchService:
         for index, (uploaded_file, prompt) in enumerate(upload_prompt_pairs, start=1):
             task_id = f"{batch_id}_TASK_{index:03d}"
             image_path = self._save_and_validate_upload(batch_id, task_id, uploaded_file)
+            image_url = None
+            if image_urls and image_urls[index - 1]:
+                image_url = image_urls[index - 1].strip()
             tasks.append(
                 VideoTask(
                     id=task_id,
                     batch_id=batch_id,
                     name=f"Task {index:03d}",
                     image_path=str(image_path),
+                    image_url=image_url,
                     prompt=prompt.strip(),
                     provider=provider.name,
                     model=self.config.seedance_model if provider.name != "mock" else None,
@@ -145,6 +152,7 @@ class WorkbenchService:
         aspect_ratio: str,
         concurrency_limit: int,
         provider_name: str = "mock",
+        image_urls: list[str | None] | None = None,
     ) -> VideoBatch:
         uploads = [PathUpload(path) for path in image_paths]
         try:
@@ -163,6 +171,7 @@ class WorkbenchService:
                 provider_name=provider_name,
                 real_api_confirmed=True,
                 maximum_cost_usd=self.config.real_video_max_cost_usd,
+                image_urls=image_urls,
             )
         finally:
             for upload in uploads:
@@ -256,6 +265,7 @@ class WorkbenchService:
     def _validate_real_submission(
         self,
         uploaded_files: list[BinaryIO],
+        image_urls: list[str | None] | None,
         concurrency_limit: int,
         real_api_confirmed: bool,
         maximum_cost_usd: float | None,
@@ -271,9 +281,20 @@ class WorkbenchService:
             raise ValueError("Paid API confirmation checkbox is required.")
         self.config.validate_seedance_config()
         if maximum_cost_usd is None:
-            raise ValueError("Maximum allowed cost is required for real provider mode.")
-        if maximum_cost_usd > self.config.real_video_max_cost_usd:
-            raise ValueError("Maximum allowed cost exceeds configured safety ceiling.")
+            raise ValueError(
+                "Operator cost acknowledgement amount is required for real provider mode."
+            )
+        if not image_urls or len(image_urls) != len(uploaded_files):
+            raise ValueError("Seedance mode requires a task-specific image_url.")
+        for image_url in image_urls:
+            self._validate_seedance_image_url(image_url)
+
+    def _validate_seedance_image_url(self, image_url: str | None) -> None:
+        if not image_url or not image_url.strip():
+            raise ValueError("Seedance mode requires a task-specific image_url.")
+        parsed = urlparse(image_url.strip())
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("Seedance image_url must be an HTTPS URL.")
 
     def _validate_batch_id(self, batch_id: str) -> None:
         if not batch_id or not SAFE_ID_RE.fullmatch(batch_id):

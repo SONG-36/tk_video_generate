@@ -114,6 +114,8 @@ def test_legacy_v01_database_migrates_idempotently(tmp_path) -> None:
     assert task.status is TaskStatus.SUCCEEDED
     assert task.provider_task_id == "provider-id"
     assert hasattr(task, "provider_status")
+    assert hasattr(task, "image_url")
+    assert task.image_url is None
 
 
 @pytest.mark.parametrize(
@@ -158,3 +160,4 @@ def test_new_provider_fields_are_persisted(app_config, sample_image) -> None:
     assert persisted.provider_task_id == "remote-task-id"
     assert persisted.provider_status == "submitted"
     assert persisted.submitted_at == "2026-07-24T00:00:00+00:00"
+    assert persisted.image_url is None

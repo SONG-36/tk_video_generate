@@ -40,6 +40,7 @@ class VideoTask:
     updated_at: str
     completed_at: str | None
     model: str | None = None
+    image_url: str | None = None
     provider_status: str | None = None
     result_url: str | None = None
     estimated_cost: float | None = None

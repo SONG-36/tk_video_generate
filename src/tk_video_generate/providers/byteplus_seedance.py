@@ -23,8 +23,8 @@ class BytePlusSeedanceProvider(VideoProvider):
     """BytePlus ModelArk Seedance provider.
 
     Contract recorded from official BytePlus ModelArk API documentation accessed
-    2026-07-24. Local first-frame upload to a public image URL was not fully
-    confirmed, so real submissions require SEEDANCE_IMAGE_URL.
+    2026-07-24. Real submissions use a task-specific HTTPS image URL. Local
+    upload paths are retained only for preview/audit and are not sent to Seedance.
     """
 
     name = "byteplus_seedance"
@@ -44,14 +44,14 @@ class BytePlusSeedanceProvider(VideoProvider):
             self.config.validate_seedance_config()
         except ValueError as exc:
             raise ProviderError("PROVIDER_CONFIG_MISSING", str(exc)) from exc
-        if not self.config.seedance_image_url:
+        if not task.image_url:
             raise ProviderError(
                 "PROVIDER_VALIDATION_ERROR",
-                "SEEDANCE_IMAGE_URL is required until official local upload contract is confirmed.",
+                "Task-specific image_url is required for Seedance real submissions.",
             )
-        parsed = urlparse(self.config.seedance_image_url)
+        parsed = urlparse(task.image_url)
         if parsed.scheme != "https" or not parsed.netloc:
-            raise ProviderError("PROVIDER_VALIDATION_ERROR", "SEEDANCE_IMAGE_URL must be HTTPS.")
+            raise ProviderError("PROVIDER_VALIDATION_ERROR", "Task image_url must be HTTPS.")
         if task.duration_seconds not in {3, 5, 10}:
             raise ProviderError("PROVIDER_VALIDATION_ERROR", "Unsupported duration.")
         if task.aspect_ratio not in {"9:16", "1:1", "16:9"}:
@@ -62,8 +62,8 @@ class BytePlusSeedanceProvider(VideoProvider):
 
     def submit(self, task: VideoTask, output_dir: Path) -> ProviderSubmission:
         self.validate(task)
-        payload = self._request_payload(task)
-        self._write_json(output_dir / "request.json", self._redacted_payload(payload))
+        payload = self.request_payload(task)
+        self._write_json(output_dir / "request.json", self.redacted_payload(payload))
         response = self._request("POST", "/contents/generations/tasks", json=payload)
         raw = self._json_response(response)
         provider_task_id = self._extract_task_id(raw)
@@ -153,12 +153,17 @@ class BytePlusSeedanceProvider(VideoProvider):
         except httpx.HTTPError as exc:
             raise ProviderError("PROVIDER_SUBMIT_FAILED", "Provider HTTP request failed.") from exc
 
-    def _request_payload(self, task: VideoTask) -> dict[str, Any]:
+    def request_payload(self, task: VideoTask) -> dict[str, Any]:
+        self.validate(task)
         return {
             "model": self.config.seedance_model,
             "content": [
                 {"type": "text", "text": task.prompt},
-                {"type": "image_url", "image_url": {"url": self.config.seedance_image_url}},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": task.image_url},
+                    "role": "first_frame",
+                },
             ],
             "duration": task.duration_seconds,
             "ratio": task.aspect_ratio,
@@ -180,58 +185,41 @@ class BytePlusSeedanceProvider(VideoProvider):
         return parsed
 
     def _extract_task_id(self, raw: dict[str, Any]) -> str | None:
-        candidates = [
-            raw.get("id"),
-            raw.get("task_id"),
-            raw.get("provider_task_id"),
-            raw.get("data", {}).get("id") if isinstance(raw.get("data"), dict) else None,
-            raw.get("data", {}).get("task_id") if isinstance(raw.get("data"), dict) else None,
-        ]
-        return next((str(value) for value in candidates if value), None)
+        value = raw.get("id")
+        return str(value) if value else None
 
     def _extract_status(self, raw: dict[str, Any]) -> str:
-        data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
-        value = raw.get("status") or raw.get("task_status") or data.get("status")
+        value = raw.get("status")
         return str(value or "unknown").lower()
 
     def _map_status(self, provider_status: str) -> str:
-        if provider_status in {"queued", "pending", "created", "submitted"}:
+        if provider_status == "queued":
             return "queued"
-        if provider_status in {"running", "processing", "in_progress"}:
+        if provider_status == "running":
             return "running"
-        if provider_status in {"succeeded", "success", "completed"}:
+        if provider_status == "succeeded":
             return "succeeded"
-        if provider_status in {"failed", "error"}:
+        if provider_status == "failed":
             return "failed"
-        if provider_status in {"cancelled", "canceled"}:
+        if provider_status == "cancelled":
             return "cancelled"
+        if provider_status == "expired":
+            return "failed"
         return "unknown"
 
     def _extract_result_url(self, raw: dict[str, Any]) -> str | None:
-        data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
-        candidates = [
-            raw.get("result_url"),
-            raw.get("video_url"),
-            data.get("result_url"),
-            data.get("video_url"),
-        ]
-        content = data.get("content") or raw.get("content")
+        content = raw.get("content")
         if isinstance(content, dict):
-            candidates.extend([content.get("video_url"), content.get("url")])
-        if isinstance(content, list):
-            for item in content:
-                if isinstance(item, dict):
-                    candidates.extend([item.get("video_url"), item.get("url")])
-        return next((str(value) for value in candidates if value), None)
+            value = content.get("video_url")
+            return str(value) if value else None
+        return None
 
     def _extract_progress(self, raw: dict[str, Any]) -> int | None:
-        data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
-        value = raw.get("progress") or data.get("progress")
+        value = raw.get("progress")
         return int(value) if isinstance(value, int | float) else None
 
     def _extract_error(self, raw: dict[str, Any]) -> tuple[str | None, str | None]:
-        data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
-        error = raw.get("error") or data.get("error")
+        error = raw.get("error")
         if isinstance(error, dict):
             return str(error.get("code") or "PROVIDER_TASK_FAILED"), str(
                 error.get("message") or "Provider task failed."
@@ -240,7 +228,7 @@ class BytePlusSeedanceProvider(VideoProvider):
             return "PROVIDER_TASK_FAILED", "Provider task failed."
         return None, None
 
-    def _redacted_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def redacted_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         redacted = self._redact(payload)
         for item in redacted.get("content", []):
             if isinstance(item, dict) and item.get("type") == "image_url":

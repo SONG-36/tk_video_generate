@@ -40,11 +40,21 @@ def render_create_batch(service: WorkbenchService) -> None:
         duration_seconds = st.selectbox("Duration", options=[3, 5, 10], index=1)
         aspect_ratio = st.selectbox("Aspect ratio", options=["9:16", "1:1", "16:9"], index=0)
         uploads = st.file_uploader(
-            "First-frame images",
+            "First-frame images (local preview / mock input)",
             type=["png", "jpg", "jpeg"],
             accept_multiple_files=not is_real,
             key=f"uploads-{batch_id}",
         )
+        seedance_image_url = None
+        if is_real:
+            seedance_image_url = st.text_input(
+                "Seedance actual first-frame HTTPS URL",
+                placeholder="https://example.com/first-frame.png",
+            )
+            st.caption(
+                "Local uploaded image is only a local preview/audit file in real mode. "
+                "The Seedance request uses the task-specific HTTPS URL above."
+            )
         prompt_text = st.text_area(
             "Prompts, one line per image",
             height=180,
@@ -76,9 +86,14 @@ def render_create_batch(service: WorkbenchService) -> None:
             )
             st.caption(f"API Configuration Status: {service.config.seedance_config_status()}")
             st.caption("Task count: 1 | Concurrency: 1")
-            st.caption(f"Estimated Cost: {'Unknown' if expected_cost is None else expected_cost}")
-            st.caption(f"Maximum Cost: ${service.config.real_video_max_cost_usd:.2f}")
-            paid_confirmed = st.checkbox("I confirm this will call a real paid API")
+            st.caption("费用未知。系统无法在提交前保证实际费用低于填写金额。")
+            st.caption(
+                f"Operator acknowledgement amount: ${service.config.real_video_max_cost_usd:.2f} "
+                "(not a Provider-enforced ceiling)"
+            )
+            paid_confirmed = st.checkbox(
+                "我理解当前费用未知，填写金额不是 Provider 强制消费上限。"
+            )
         else:
             paid_confirmed = True
             st.caption(
@@ -105,6 +120,7 @@ def render_create_batch(service: WorkbenchService) -> None:
             provider_name=provider_name,
             real_api_confirmed=paid_confirmed,
             maximum_cost_usd=service.config.real_video_max_cost_usd,
+            image_urls=[seedance_image_url] if is_real else None,
         )
     except ValueError as exc:
         st.error(str(exc))

@@ -50,6 +50,7 @@ class SQLiteRepository:
                     batch_id TEXT NOT NULL REFERENCES batches(id),
                     name TEXT NOT NULL,
                     image_path TEXT NOT NULL,
+                    image_url TEXT,
                     prompt TEXT NOT NULL,
                     provider TEXT NOT NULL,
                     model TEXT,
@@ -98,6 +99,7 @@ class SQLiteRepository:
         task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
         task_migrations = {
             "model": "TEXT",
+            "image_url": "TEXT",
             "provider_status": "TEXT",
             "result_url": "TEXT",
             "estimated_cost": "REAL",
@@ -151,6 +153,7 @@ class SQLiteRepository:
                     batch_id,
                     name,
                     image_path,
+                    image_url,
                     prompt,
                     provider,
                     model,
@@ -182,7 +185,7 @@ class SQLiteRepository:
                     completed_at
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 [self._task_values(task) for task in tasks],
@@ -612,6 +615,7 @@ class SQLiteRepository:
             task.batch_id,
             task.name,
             task.image_path,
+            task.image_url,
             task.prompt,
             task.provider,
             task.model,
@@ -661,6 +665,7 @@ class SQLiteRepository:
             batch_id=row["batch_id"],
             name=row["name"],
             image_path=row["image_path"],
+            image_url=row["image_url"],
             prompt=row["prompt"],
             provider=row["provider"],
             model=row["model"],

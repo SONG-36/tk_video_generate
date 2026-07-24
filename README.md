@@ -19,14 +19,19 @@ single-task Seedance provider infrastructure.
 - No real batch generation.
 - Requires official provider configuration from server environment variables.
 - Current provider channel: BytePlus ModelArk Seedance.
-- Official documentation source: https://docs.byteplus.com/en/docs/ModelArk/1520757
+- Official create-task documentation: https://docs.byteplus.com/en/docs/ModelArk/1520757
+- Official retrieve-task documentation: https://docs.byteplus.com/en/docs/ModelArk/1521309
+- Official authentication documentation: https://docs.byteplus.com/en/docs/ModelArk/1298459
 - Documentation access date: 2026-07-24.
 - API surface implemented: ModelArk API v3 task submit and task query endpoints.
 
-The local-image upload to official `image_url` contract was not fully confirmed
-during implementation. For safety, real submissions require `SEEDANCE_IMAGE_URL`
-to point to an HTTPS first-frame URL. Do not use this mode until the image input
-contract is verified for your account and model.
+Real submissions require a task-specific HTTPS first-frame `image_url`. The
+local uploaded image is saved only as a preview/audit file in real mode; it is
+not uploaded to BytePlus and is not sent in the Seedance request. Mock mode still
+uses local images.
+
+See [docs/SEEDANCE_PROVIDER_CONTRACT.md](docs/SEEDANCE_PROVIDER_CONTRACT.md) for
+the official contract evidence and field mapping.
 
 ## Configuration
 
@@ -35,17 +40,32 @@ it. The app itself does not auto-load `.env`.
 
 Required for Seedance mode:
 
-```dotenv
-VIDEO_PROVIDER=byteplus_seedance
-SEEDANCE_API_KEY=
-SEEDANCE_BASE_URL=https://ark.ap-southeast.bytepluses.com/api/v3
-SEEDANCE_MODEL=
-SEEDANCE_IMAGE_URL=
-REAL_VIDEO_MAX_COST_USD=1.00
+macOS/Linux:
+
+```bash
+export VIDEO_PROVIDER="byteplus_seedance"
+export SEEDANCE_API_KEY="..."
+export SEEDANCE_BASE_URL="https://ark.ap-southeast.bytepluses.com/api/v3"
+export SEEDANCE_MODEL="..."
+export REAL_VIDEO_MAX_COST_USD="1.00"
+```
+
+Windows PowerShell:
+
+```powershell
+$env:VIDEO_PROVIDER="byteplus_seedance"
+$env:SEEDANCE_API_KEY="..."
+$env:SEEDANCE_BASE_URL="https://ark.ap-southeast.bytepluses.com/api/v3"
+$env:SEEDANCE_MODEL="..."
+$env:REAL_VIDEO_MAX_COST_USD="1.00"
 ```
 
 Never commit `.env` or API keys. The app only displays configuration status as
 `Configured` or `Missing`; it does not print key contents.
+
+`REAL_VIDEO_MAX_COST_USD` is retained as an operator acknowledgement amount in
+V0.2.1. It is not a Provider-enforced spending ceiling because the official
+model/endpoint price formula is not implemented in code.
 
 ## Run
 
@@ -96,15 +116,29 @@ Do not run this casually. It can call a real paid API.
 
 ```bash
 python scripts/real_seedance_smoke.py \
+  --dry-run \
+  --image-url "https://example.com/first-frame.png" \
+  --prompt "A controlled slow camera movement around the product."
+```
+
+For real execution, the script requires both the task-specific Seedance input
+URL and a separate local preview/audit image. Do not run this casually. It can
+call a real paid API.
+
+```bash
+python scripts/real_seedance_smoke.py \
   --allow-real-api \
   --human-confirm "CONFIRM REAL SMOKE" \
-  --image /absolute/path/to/first-frame.png \
+  --image-url "https://example.com/first-frame.png" \
+  --local-preview-image /absolute/path/to/local-preview.png \
   --prompt "A controlled slow camera movement around the product." \
-  --max-cost-usd 1.00
+  --operator-cost-ack-usd 1.00
 ```
 
 The script refuses to call the API unless all explicit confirmation arguments
 are present. It submits exactly one task and does not perform batch generation.
+`--operator-cost-ack-usd` is an acknowledgement amount, not a Provider-enforced
+ceiling.
 
 ## Current Limits
 

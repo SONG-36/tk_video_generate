@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from conftest import create_batch, make_upload
 
+from tk_video_generate.config import AppConfig
 from tk_video_generate.services.workbench_service import WorkbenchService
 
 
@@ -175,3 +176,56 @@ def test_duplicate_confirmation_cannot_duplicate_tasks(app_config, image_upload_
         service.create_confirmed_batch(uploaded_files=[make_upload(image_upload_bytes)], **kwargs)
 
     assert len(service.list_tasks("BATCH_DUPLICATE")) == 1
+
+
+def test_real_task_requires_and_persists_task_specific_image_url(
+    tmp_path,
+    image_upload_bytes,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    config = AppConfig(
+        project_root=tmp_path,
+        database_path=tmp_path / "data/app.db",
+        storage_dir=storage_dir,
+        uploads_dir=storage_dir / "uploads",
+        outputs_dir=storage_dir / "outputs",
+        archives_dir=storage_dir / "archives",
+        seedance_api_key="secret-key",
+        seedance_model="seedance-test",
+    )
+    service = WorkbenchService(config)
+
+    with pytest.raises(ValueError, match="image_url"):
+        service.create_confirmed_batch(
+            batch_id="BATCH_REAL_NO_URL",
+            batch_name="real",
+            uploaded_files=[make_upload(image_upload_bytes)],
+            prompts=["normal prompt"],
+            duration_seconds=5,
+            aspect_ratio="9:16",
+            concurrency_limit=1,
+            confirmation="CONFIRM REAL BATCH_REAL_NO_URL",
+            expected_confirmation="CONFIRM REAL BATCH_REAL_NO_URL",
+            provider_name="byteplus_seedance",
+            real_api_confirmed=True,
+            maximum_cost_usd=1.0,
+        )
+
+    batch = service.create_confirmed_batch(
+        batch_id="BATCH_REAL_URL",
+        batch_name="real",
+        uploaded_files=[make_upload(image_upload_bytes)],
+        prompts=["normal prompt"],
+        duration_seconds=5,
+        aspect_ratio="9:16",
+        concurrency_limit=1,
+        confirmation="CONFIRM REAL BATCH_REAL_URL",
+        expected_confirmation="CONFIRM REAL BATCH_REAL_URL",
+        provider_name="byteplus_seedance",
+        real_api_confirmed=True,
+        maximum_cost_usd=1.0,
+        image_urls=["https://example.com/task-first-frame.png"],
+    )
+
+    task = service.list_tasks(batch.id)[0]
+    assert task.image_url == "https://example.com/task-first-frame.png"
