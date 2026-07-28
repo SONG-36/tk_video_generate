@@ -1,0 +1,4 @@
+interface:
+  display_name: "TikTok 运营制作开发"
+  short_description: "遵循既定架构安全开发 TikTok 运营制作项目功能"
+  default_prompt: "Use $tiktok-operations-development to implement the next feature while preserving the project architecture and validation requirements."

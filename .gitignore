@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-tmp/
+.test-artifacts/
+.mypy_cache/
+frontend/node_modules/
+frontend/dist/
+storage/uploads/*
+storage/outputs/*
+storage/temp/*
+!storage/**/.gitkeep
+mysql_data/
+.idea/
+.vscode/
