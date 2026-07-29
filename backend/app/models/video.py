@@ -1,7 +1,7 @@
 import enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -75,9 +75,10 @@ class VideoGenerationTaskDetail(Base):
         default=VideoOutputFormat.MP4,
         comment="输出格式，当前固定为MP4",
     )
-    model: Mapped[VideoModel] = mapped_column(
-        Enum(VideoModel),
-        default=VideoModel.SEEDANCE_2_0_MINI,
+    model: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        default=VideoModel.SEEDANCE_2_0_MINI.value,
         comment="用户选择的视频模型ID",
     )
     task: Mapped["GenerationTask"] = relationship(back_populates="video_detail")

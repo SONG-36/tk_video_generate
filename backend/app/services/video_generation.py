@@ -98,7 +98,7 @@ class VideoBatchService:
                     fixed_duration=task_input.fixed_duration,
                     output_sound=task_input.output_sound,
                     output_format=VideoOutputFormat.MP4,
-                    model=task_input.model,
+                    model=task_input.model.value,
                 )
                 session.add(task)
                 session.flush()
@@ -243,7 +243,7 @@ class VideoGenerationService:
                 )
             )
             task.provider = self.provider.name
-            task.model = request.model.value
+            task.model = request.model
             task.provider_task_id = result.provider_task_id
             task.status = TaskStatus.SUCCESS
             task.finished_at = datetime.now()
@@ -276,7 +276,7 @@ class VideoGenerationService:
         if model:
             task.model = model
         elif task.video_detail is not None:
-            task.model = task.video_detail.model.value
+            task.model = task.video_detail.model
         if provider_task_id:
             task.provider_task_id = provider_task_id
         task.status = TaskStatus.FAILED

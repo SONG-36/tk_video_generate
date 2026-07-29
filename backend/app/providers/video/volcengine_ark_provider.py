@@ -157,7 +157,7 @@ class VolcengineArkVideoGenerationProvider(VideoGenerationProvider):
             request.task_id,
             task_id,
             request.aspect_ratio.value,
-            request.model.value,
+            request.model,
         )
         return task_id
 
@@ -295,7 +295,7 @@ class VolcengineArkVideoGenerationProvider(VideoGenerationProvider):
             )
 
         payload: dict[str, Any] = {
-            "model": request.model.value,
+            "model": request.model,
             "content": content,
             "resolution": request.resolution.value.lower(),
             "ratio": request.aspect_ratio.value,
@@ -639,7 +639,7 @@ class VolcengineArkVideoGenerationProvider(VideoGenerationProvider):
             provider_task_id,
             stage,
             request.aspect_ratio.value,
-            request.model.value,
+            request.model,
             type(exc).__name__,
             self._safe_exception_repr(exc),
         )

@@ -19,21 +19,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    video_model_enum = sa.Enum(
-        "SEEDANCE_2_0",
-        "SEEDANCE_2_0_MINI",
-        name="videomodel",
-    )
-
-    # 先使用临时数据库默认值添加非空字段，
-    # 让表中已有的视频任务能够顺利完成迁移。
+    # 新增视频模型字段（VARCHAR 存储真实模型 ID）。
     op.add_column(
         "video_generation_task_detail",
         sa.Column(
             "model",
-            video_model_enum,
+            sa.String(length=128),
             nullable=False,
-            server_default="SEEDANCE_2_0_MINI",
+            server_default="doubao-seedance-2-0-mini-260615",
             comment="用户选择的视频模型ID",
         ),
     )
@@ -43,7 +36,7 @@ def upgrade() -> None:
     op.alter_column(
         "video_generation_task_detail",
         "model",
-        existing_type=video_model_enum,
+        existing_type=sa.String(length=128),
         existing_nullable=False,
         server_default=None,
         existing_comment="用户选择的视频模型ID",

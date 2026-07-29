@@ -29,7 +29,7 @@ class VideoGenerationService:
                 fixed_duration=5,
                 output_sound=False,
                 output_format=VideoOutputFormat.MP4,
-                model=VideoModel.SEEDANCE_2_0_MINI,
+                model=VideoModel.SEEDANCE_2_0_MINI.value,
                 reference_paths=[],
             )
         )

@@ -61,7 +61,7 @@ class MockVideoGenerationProvider(VideoGenerationProvider):
         logger.info(
             "Mock video generation task_id=%s model=%s",
             request.task_id,
-            request.model.value,
+            request.model,
         )
         return VideoGenerationResult(
             provider_task_id=f"mock-video-{request.task_id}",

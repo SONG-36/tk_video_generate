@@ -56,7 +56,7 @@ def make_request(
         duration_mode=duration_mode,
         fixed_duration=fixed_duration,
         output_sound=output_sound,
-        model=VideoModel.SEEDANCE_2_0_MINI,
+        model=VideoModel.SEEDANCE_2_0_MINI.value,
         output_format=VideoOutputFormat.MP4,
         reference_paths=reference_paths or [],
     )
@@ -107,7 +107,7 @@ def test_ark_create_poll_download_and_usage(workspace_tmp_path: Path) -> None:
     payload = json.loads(requests[0].content)
     assert requests[0].url.path == "/api/v3/contents/generations/tasks"
     assert requests[0].headers["authorization"] == "Bearer ark-test-key"
-    assert payload["model"] == "doubao-seedance-2-0-260128"
+    assert payload["model"] == "doubao-seedance-2-0-mini-260615"
     assert payload["resolution"] == "720p"
     assert payload["ratio"] == "9:16"
     assert payload["duration"] == 5
