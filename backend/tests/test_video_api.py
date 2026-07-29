@@ -185,3 +185,125 @@ def test_video_reference_upload_validates_image_content(
     assert invalid.status_code == 422
     assert invalid.json()["code"] == "INVALID_IMAGE_CONTENT"
     assert valid.status_code == 201
+
+
+# ── 视频提示词长度校验 ──
+
+
+def test_video_prompt_length_1_passes(workspace_tmp_path, monkeypatch) -> None:
+    client, _, _, _ = create_video_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "a", "reference_mode": "REFERENCE", "resolution": "720P",
+                     "aspect_ratio": "9:16", "duration_mode": "SMART", "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/video/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 201, response.text
+
+
+def test_video_prompt_length_1000_passes(workspace_tmp_path, monkeypatch) -> None:
+    client, _, _, _ = create_video_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "a" * 1000, "reference_mode": "REFERENCE", "resolution": "720P",
+                     "aspect_ratio": "9:16", "duration_mode": "SMART", "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/video/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 201, response.text
+
+
+def test_video_prompt_length_10000_passes(workspace_tmp_path, monkeypatch) -> None:
+    client, _, _, _ = create_video_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "a" * 10000, "reference_mode": "REFERENCE", "resolution": "720P",
+                     "aspect_ratio": "9:16", "duration_mode": "SMART", "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/video/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 201, response.text
+
+
+def test_video_prompt_length_10001_rejected(workspace_tmp_path, monkeypatch) -> None:
+    client, sessions, _, _ = create_video_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "a" * 10001, "reference_mode": "REFERENCE", "resolution": "720P",
+                     "aspect_ratio": "9:16", "duration_mode": "SMART", "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/video/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    with sessions() as session:
+        assert session.scalar(select(GenerationTask)) is None
+
+
+def test_video_prompt_empty_rejected(workspace_tmp_path, monkeypatch) -> None:
+    client, sessions, _, _ = create_video_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "", "reference_mode": "REFERENCE", "resolution": "720P",
+                     "aspect_ratio": "9:16", "duration_mode": "SMART", "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/video/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    with sessions() as session:
+        assert session.scalar(select(GenerationTask)) is None
+
+
+def test_video_prompt_whitespace_rejected(workspace_tmp_path, monkeypatch) -> None:
+    client, sessions, _, _ = create_video_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "   ", "reference_mode": "REFERENCE", "resolution": "720P",
+                     "aspect_ratio": "9:16", "duration_mode": "SMART", "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/video/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    with sessions() as session:
+        assert session.scalar(select(GenerationTask)) is None
+
+
+def test_video_batch_any_prompt_over_limit_rejects_whole_batch(
+    workspace_tmp_path, monkeypatch
+) -> None:
+    client, sessions, _, _ = create_video_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [
+            {"prompt": "valid prompt", "reference_mode": "REFERENCE", "resolution": "720P",
+             "aspect_ratio": "9:16", "duration_mode": "SMART", "reference_images": []},
+            {"prompt": "a" * 10001, "reference_mode": "REFERENCE", "resolution": "720P",
+             "aspect_ratio": "9:16", "duration_mode": "SMART", "reference_images": []},
+        ]
+    }
+    with client:
+        response = client.post(
+            "/api/video/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    with sessions() as session:
+        assert session.scalar(select(GenerationTask)) is None

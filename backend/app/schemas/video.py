@@ -15,7 +15,7 @@ from app.schemas.image import GenerationResultResponse
 
 
 class VideoBatchTaskCreate(BaseModel):
-    prompt: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1, max_length=10000)
     reference_mode: VideoReferenceMode = VideoReferenceMode.REFERENCE
     resolution: VideoResolution = VideoResolution.P720
     aspect_ratio: VideoAspectRatio = VideoAspectRatio.PORTRAIT_9_16

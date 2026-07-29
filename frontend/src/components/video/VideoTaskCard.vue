@@ -110,7 +110,7 @@ function formatSize(bytes: number) {
           :model-value="task.prompt"
           type="textarea"
           :rows="7"
-          maxlength="1000"
+          maxlength="10000"
           show-word-limit
           :disabled="disabled"
           placeholder="描述主体运动、镜头轨迹、场景氛围与节奏……"

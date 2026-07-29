@@ -160,3 +160,117 @@ def test_reference_upload_validates_real_image_content(workspace_tmp_path, monke
     assert valid.status_code == 201
     with sessions() as session:
         assert len(session.scalars(select(TaskReferenceImage)).all()) == 1
+
+
+# ── 图片提示词长度校验 ──
+
+
+def test_image_prompt_length_1_passes(workspace_tmp_path, monkeypatch) -> None:
+    client, _, _, _ = create_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "a", "aspect_ratio": "9:16", "image_count": 1, "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/image/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 201, response.text
+
+
+def test_image_prompt_length_1000_passes(workspace_tmp_path, monkeypatch) -> None:
+    client, _, _, _ = create_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "a" * 1000, "aspect_ratio": "9:16", "image_count": 1, "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/image/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 201, response.text
+
+
+def test_image_prompt_length_10000_passes(workspace_tmp_path, monkeypatch) -> None:
+    client, _, _, _ = create_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "a" * 10000, "aspect_ratio": "9:16", "image_count": 1, "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/image/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 201, response.text
+
+
+def test_image_prompt_length_10001_rejected(workspace_tmp_path, monkeypatch) -> None:
+    client, sessions, _, _ = create_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "a" * 10001, "aspect_ratio": "9:16", "image_count": 1, "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/image/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    with sessions() as session:
+        assert session.scalar(select(GenerationTask)) is None
+
+
+def test_image_prompt_empty_rejected(workspace_tmp_path, monkeypatch) -> None:
+    client, sessions, _, _ = create_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "", "aspect_ratio": "9:16", "image_count": 1, "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/image/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    with sessions() as session:
+        assert session.scalar(select(GenerationTask)) is None
+
+
+def test_image_prompt_whitespace_rejected(workspace_tmp_path, monkeypatch) -> None:
+    client, sessions, _, _ = create_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [{"prompt": "   ", "aspect_ratio": "9:16", "image_count": 1, "reference_images": []}]
+    }
+    with client:
+        response = client.post(
+            "/api/image/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    with sessions() as session:
+        assert session.scalar(select(GenerationTask)) is None
+
+
+def test_image_batch_any_prompt_over_limit_rejects_whole_batch(
+    workspace_tmp_path, monkeypatch
+) -> None:
+    client, sessions, _, _ = create_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [
+            {"prompt": "valid prompt", "aspect_ratio": "9:16", "image_count": 1, "reference_images": []},
+            {"prompt": "a" * 10001, "aspect_ratio": "9:16", "image_count": 1, "reference_images": []},
+        ]
+    }
+    with client:
+        response = client.post(
+            "/api/image/batches",
+            files={"payload": (None, json.dumps(payload), "application/json")},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    with sessions() as session:
+        assert session.scalar(select(GenerationTask)) is None

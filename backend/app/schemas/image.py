@@ -7,7 +7,7 @@ from app.models.image import ImageAspectRatio, ImageOutputFormat
 
 
 class ImageBatchTaskCreate(BaseModel):
-    prompt: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1, max_length=10000)
     aspect_ratio: ImageAspectRatio = ImageAspectRatio.PORTRAIT_9_16
     image_count: int = 1
     reference_images: list[str] = Field(default_factory=list, max_length=5)

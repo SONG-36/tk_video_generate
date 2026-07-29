@@ -90,7 +90,7 @@ function formatSize(bytes: number) {
           :model-value="task.prompt"
           type="textarea"
           :rows="7"
-          maxlength="1000"
+          maxlength="10000"
           show-word-limit
           :disabled="disabled"
           placeholder="描述画面主体、场景、光线、风格与构图"
