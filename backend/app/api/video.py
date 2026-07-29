@@ -118,6 +118,7 @@ def get_video_batch_status(
                 fixed_duration=detail.fixed_duration,
                 output_sound=detail.output_sound,
                 output_format=detail.output_format,
+                model=detail.model,
                 error_code=task.error_code,
                 error_message=task.error_message,
                 results=[

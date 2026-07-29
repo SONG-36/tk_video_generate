@@ -1,6 +1,7 @@
 from app.models.video import (
     VideoAspectRatio,
     VideoDurationMode,
+    VideoModel,
     VideoOutputFormat,
     VideoReferenceMode,
     VideoResolution,
@@ -28,6 +29,7 @@ class VideoGenerationService:
                 fixed_duration=5,
                 output_sound=False,
                 output_format=VideoOutputFormat.MP4,
+                model=VideoModel.SEEDANCE_2_0_MINI,
                 reference_paths=[],
             )
         )

@@ -5,6 +5,7 @@ from app.models.video import (
     VideoAspectRatio,
     VideoDurationMode,
     VideoOutputFormat,
+    VideoModel,
     VideoReferenceMode,
     VideoResolution,
 )
@@ -47,6 +48,7 @@ def test_mock_providers_implement_interfaces() -> None:
                 fixed_duration=5,
                 output_sound=False,
                 output_format=VideoOutputFormat.MP4,
+                model=VideoModel.SEEDANCE_2_0_MINI,
                 reference_paths=[],
             )
         )

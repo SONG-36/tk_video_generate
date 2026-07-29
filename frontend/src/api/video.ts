@@ -24,6 +24,7 @@ interface VideoTaskStatusDto {
   duration_mode: 'FIXED' | 'SMART'
   fixed_duration: number | null
   output_sound: boolean
+  model: 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-mini-260615'
   error_code: string | null
   error_message: string | null
   results: Array<{
@@ -67,6 +68,7 @@ export async function submitVideoBatch(tasks: VideoTask[]): Promise<VideoBatchCr
         duration_mode: durationModeMap[task.durationMode],
         fixed_duration: task.durationMode === '固定时长' ? task.fixedDuration : null,
         output_sound: task.sound,
+        model: task.model,
         reference_images: task.files.map((file) => file.name),
       })),
     }),

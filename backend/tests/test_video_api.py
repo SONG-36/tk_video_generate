@@ -116,7 +116,7 @@ def test_video_batch_rejects_invalid_duration_and_missing_first_frame(
                 "resolution": "720P",
                 "aspect_ratio": "9:16",
                 "duration_mode": "FIXED",
-                "fixed_duration": 7,
+                "fixed_duration": 3,
                 "reference_images": [],
             }
         ]

@@ -69,7 +69,7 @@ async def _run_video_generation_task_async(
             task_id,
             exc,
             provider=getattr(provider, "name", None),
-            model=getattr(provider, "model", None),
+            model=None,
             provider_task_id=getattr(provider, "last_provider_task_id", None),
         )
         logger.error(

@@ -6,6 +6,7 @@ from app.models.generation import BatchStatus, TaskStatus
 from app.models.video import (
     VideoAspectRatio,
     VideoDurationMode,
+    VideoModel,
     VideoOutputFormat,
     VideoReferenceMode,
     VideoResolution,
@@ -21,6 +22,7 @@ class VideoBatchTaskCreate(BaseModel):
     duration_mode: VideoDurationMode = VideoDurationMode.FIXED
     fixed_duration: int | None = 5
     output_sound: bool = False
+    model: VideoModel = VideoModel.SEEDANCE_2_0_MINI
     reference_images: list[str] = Field(default_factory=list, max_length=5)
 
     @model_validator(mode="after")
@@ -32,8 +34,11 @@ class VideoBatchTaskCreate(BaseModel):
             if len(self.reference_images) != 1:
                 raise ValueError("首帧图模式必须上传且只能上传 1 张图片")
         if self.duration_mode == VideoDurationMode.FIXED:
-            if self.fixed_duration not in {5, 10, 15}:
-                raise ValueError("固定时长只能是 5、10 或 15 秒")
+            if not (
+                isinstance(self.fixed_duration, int)
+                and 4 <= self.fixed_duration <= 15
+            ):
+                raise ValueError("固定时长须为 4～15 的整数秒")
         else:
             self.fixed_duration = None
         return self
@@ -65,6 +70,7 @@ class VideoTaskStatusResponse(BaseModel):
     fixed_duration: int | None
     output_sound: bool
     output_format: VideoOutputFormat
+    model: VideoModel
     error_code: str | None
     error_message: str | None
     results: list[GenerationResultResponse]

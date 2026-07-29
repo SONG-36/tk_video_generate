@@ -25,6 +25,7 @@ const createTask = (): VideoTask => ({
   durationMode: '固定时长',
   fixedDuration: 5,
   sound: false,
+  model: 'doubao-seedance-2-0-mini-260615',
   errors: [],
   status: 'DRAFT',
   results: [],

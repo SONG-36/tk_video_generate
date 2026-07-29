@@ -5,6 +5,7 @@ from pathlib import Path
 from app.models.video import (
     VideoAspectRatio,
     VideoDurationMode,
+    VideoModel,
     VideoOutputFormat,
     VideoReferenceMode,
     VideoResolution,
@@ -29,6 +30,7 @@ class VideoGenerationRequest:
     fixed_duration: int | None
     output_sound: bool
     output_format: VideoOutputFormat
+    model: VideoModel
     reference_paths: list[Path]
 
 

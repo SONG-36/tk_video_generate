@@ -1,3 +1,4 @@
+import logging
 from base64 import b64decode
 
 from app.providers.video.base import (
@@ -5,6 +6,7 @@ from app.providers.video.base import (
     VideoGenerationRequest,
     VideoGenerationResult,
 )
+logger = logging.getLogger(__name__)
 
 # A deterministic one-second H.264 MP4 used only to exercise the local workflow.
 MOCK_MP4 = b64decode(
@@ -56,6 +58,11 @@ class MockVideoGenerationProvider(VideoGenerationProvider):
     model = "mock-video-v1"
 
     async def generate(self, request: VideoGenerationRequest) -> VideoGenerationResult:
+        logger.info(
+            "Mock video generation task_id=%s model=%s",
+            request.task_id,
+            request.model.value,
+        )
         return VideoGenerationResult(
             provider_task_id=f"mock-video-{request.task_id}",
             content=MOCK_MP4,

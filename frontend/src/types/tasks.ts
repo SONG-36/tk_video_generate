@@ -4,7 +4,8 @@ export type ReferenceMode = '参考生成' | '首帧图'
 export type Resolution = '480P' | '720P'
 export type VideoRatio = '16:9' | '9:16'
 export type DurationMode = '固定时长' | '智能时长'
-export type FixedDuration = 5 | 10 | 15
+export type FixedDuration = number
+export type VideoModel = 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-mini-260615'
 export type GenerationTaskStatus =
   | 'DRAFT'
   | 'PENDING'
@@ -45,6 +46,7 @@ export interface VideoTask extends BaseTask {
   durationMode: DurationMode
   fixedDuration: FixedDuration
   sound: boolean
+  model: VideoModel
   serverTaskId?: number
   status: GenerationTaskStatus
   errorMessage?: string

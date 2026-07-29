@@ -11,6 +11,7 @@ from app.core.exceptions import AppError
 from app.models.video import (
     VideoAspectRatio,
     VideoDurationMode,
+    VideoModel,
     VideoOutputFormat,
     VideoReferenceMode,
     VideoResolution,
@@ -55,6 +56,7 @@ def make_request(
         duration_mode=duration_mode,
         fixed_duration=fixed_duration,
         output_sound=output_sound,
+        model=VideoModel.SEEDANCE_2_0_MINI,
         output_format=VideoOutputFormat.MP4,
         reference_paths=reference_paths or [],
     )

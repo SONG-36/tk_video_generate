@@ -33,6 +33,10 @@ class VideoDurationMode(str, enum.Enum):
 class VideoOutputFormat(str, enum.Enum):
     MP4 = "MP4"
 
+class VideoModel(str, enum.Enum):
+    SEEDANCE_2_0 = "doubao-seedance-2-0-260128"
+    SEEDANCE_2_0_MINI = "doubao-seedance-2-0-mini-260615"
+
 
 class VideoGenerationTaskDetail(Base):
     __tablename__ = "video_generation_task_detail"
@@ -61,7 +65,7 @@ class VideoGenerationTaskDetail(Base):
         Enum(VideoDurationMode), comment="时长模式：FIXED固定，SMART智能"
     )
     fixed_duration: Mapped[int | None] = mapped_column(
-        Integer, comment="固定时长秒数：5、10或15；智能时长时为空"
+        Integer, comment="固定时长秒数：4～15；智能时长时为空"
     )
     output_sound: Mapped[bool] = mapped_column(
         Boolean, default=False, comment="是否要求生成同步声音"
@@ -70,5 +74,10 @@ class VideoGenerationTaskDetail(Base):
         Enum(VideoOutputFormat),
         default=VideoOutputFormat.MP4,
         comment="输出格式，当前固定为MP4",
+    )
+    model: Mapped[VideoModel] = mapped_column(
+        Enum(VideoModel),
+        default=VideoModel.SEEDANCE_2_0_MINI,
+        comment="用户选择的视频模型ID",
     )
     task: Mapped["GenerationTask"] = relationship(back_populates="video_detail")

@@ -153,10 +153,11 @@ class VolcengineArkVideoGenerationProvider(VideoGenerationProvider):
             )
         logger.info(
             "Created Volcengine Ark video task local_task_id=%s "
-            "provider_task_id=%s stage=create aspect_ratio=%s",
+            "provider_task_id=%s stage=create aspect_ratio=%s model=%s",
             request.task_id,
             task_id,
             request.aspect_ratio.value,
+            request.model.value,
         )
         return task_id
 
@@ -294,7 +295,7 @@ class VolcengineArkVideoGenerationProvider(VideoGenerationProvider):
             )
 
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": request.model.value,
             "content": content,
             "resolution": request.resolution.value.lower(),
             "ratio": request.aspect_ratio.value,
@@ -632,12 +633,13 @@ class VolcengineArkVideoGenerationProvider(VideoGenerationProvider):
     ) -> None:
         logger.error(
             "Volcengine Ark video request exception local_task_id=%s "
-            "provider_task_id=%s stage=%s aspect_ratio=%s "
+            "provider_task_id=%s stage=%s aspect_ratio=%s model=%s "
             "exception_type=%s exception_repr=%s",
             request.task_id,
             provider_task_id,
             stage,
             request.aspect_ratio.value,
+            request.model.value,
             type(exc).__name__,
             self._safe_exception_repr(exc),
         )

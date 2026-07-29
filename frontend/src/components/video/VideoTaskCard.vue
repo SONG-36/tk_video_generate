@@ -6,6 +6,7 @@ import type {
   FixedDuration,
   ReferenceMode,
   Resolution,
+  VideoModel,
   VideoRatio,
   VideoTask,
 } from '@/types/tasks'
@@ -151,15 +152,15 @@ function formatSize(bytes: number) {
       </div>
       <div v-if="task.durationMode === '固定时长'" class="field">
         <label>固定时长</label>
-        <el-radio-group
+        <el-input-number
           :model-value="task.fixedDuration"
+          :min="4"
+          :max="15"
+          :step="1"
           :disabled="disabled"
-          @update:model-value="(value: string | number | boolean) => update({ fixedDuration: value as FixedDuration })"
-        >
-          <el-radio-button :label="5">5 秒</el-radio-button>
-          <el-radio-button :label="10">10 秒</el-radio-button>
-          <el-radio-button :label="15">15 秒</el-radio-button>
-        </el-radio-group>
+          controls-position="right"
+          @update:model-value="(value: number | undefined) => update({ fixedDuration: (value ?? 5) as FixedDuration })"
+        />
       </div>
       <div class="field sound-field">
         <label>输出声音</label>
@@ -170,6 +171,18 @@ function formatSize(bytes: number) {
           inactive-text="关闭"
           @update:model-value="(value: string | number | boolean) => update({ sound: Boolean(value) })"
         />
+      </div>
+      <div class="field">
+        <label>视频模型</label>
+        <el-select
+          :model-value="task.model"
+          :disabled="disabled"
+          placeholder="请选择模型"
+          @update:model-value="(value: string | number | boolean) => update({ model: value as VideoModel })"
+        >
+          <el-option label="Doubao-Seedance-2.0" value="doubao-seedance-2-0-260128" />
+          <el-option label="Doubao-Seedance-2.0-mini" value="doubao-seedance-2-0-mini-260615" />
+        </el-select>
       </div>
     </div>
 
