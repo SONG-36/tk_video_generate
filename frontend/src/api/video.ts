@@ -61,6 +61,7 @@ export async function submitVideoBatch(tasks: VideoTask[]): Promise<VideoBatchCr
     'payload',
     JSON.stringify({
       tasks: tasks.map((task) => ({
+        // 前端校验只负责即时反馈；保留原始 @ 标记交给后端做权威校验和转换。
         prompt: task.prompt.trim(),
         reference_mode: referenceModeMap[task.referenceMode],
         resolution: task.resolution,

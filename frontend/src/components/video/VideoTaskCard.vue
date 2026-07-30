@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Delete, Download, Loading } from '@element-plus/icons-vue'
 import ReferenceUpload from '@/components/ReferenceUpload.vue'
+import ImageMentionInput from '@/components/video/ImageMentionInput.vue'
 import type {
   DurationMode,
   FixedDuration,
@@ -10,6 +12,10 @@ import type {
   VideoRatio,
   VideoTask,
 } from '@/types/tasks'
+import {
+  remapVideoImageReferences,
+  validateVideoImageReferences,
+} from '@/utils/videoPrompt'
 
 const props = defineProps<{
   task: VideoTask
@@ -23,14 +29,27 @@ const emit = defineEmits<{
   remove: []
 }>()
 
+const imageReferenceErrors = computed(() =>
+  validateVideoImageReferences(props.task.prompt, props.task.files.length),
+)
+
 function update(patch: Partial<VideoTask>) {
   emit('update:task', { ...props.task, ...patch })
 }
 
 function updateReferenceMode(value: ReferenceMode) {
+  const files = value === '首帧图' ? props.task.files.slice(0, 1) : props.task.files
   update({
     referenceMode: value,
-    files: value === '首帧图' ? props.task.files.slice(0, 1) : props.task.files,
+    files,
+    prompt: remapVideoImageReferences(props.task.prompt, props.task.files, files),
+  })
+}
+
+function updateFiles(files: File[]) {
+  update({
+    files,
+    prompt: remapVideoImageReferences(props.task.prompt, props.task.files, files),
   })
 }
 
@@ -101,21 +120,20 @@ function formatSize(bytes: number) {
           :files="task.files"
           :limit="task.referenceMode === '首帧图' ? 1 : 5"
           :disabled="disabled"
-          @change="(files) => update({ files })"
+          @change="updateFiles"
         />
       </div>
       <div class="field prompt-field">
         <label>提示词 <b>*</b></label>
-        <el-input
+        <ImageMentionInput
           :model-value="task.prompt"
-          type="textarea"
-          :rows="7"
-          maxlength="10000"
-          show-word-limit
+          :files="task.files"
           :disabled="disabled"
-          placeholder="描述主体运动、镜头轨迹、场景氛围与节奏……"
-          @update:model-value="(value: string) => update({ prompt: value })"
+          @update:model-value="(value) => update({ prompt: value })"
         />
+        <div v-if="imageReferenceErrors.length" class="image-mention-validation">
+          {{ imageReferenceErrors.join('；') }}
+        </div>
       </div>
       <div class="field">
         <label>分辨率</label>

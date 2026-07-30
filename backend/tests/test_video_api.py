@@ -1,6 +1,7 @@
 import json
 from collections.abc import Generator
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -185,6 +186,127 @@ def test_video_reference_upload_validates_image_content(
     assert invalid.status_code == 422
     assert invalid.json()["code"] == "INVALID_IMAGE_CONTENT"
     assert valid.status_code == 201
+
+
+def test_video_batch_persists_five_reference_positions_and_normalizes_prompt(
+    workspace_tmp_path, monkeypatch
+) -> None:
+    client, sessions, _, _ = create_video_test_client(workspace_tmp_path, monkeypatch)
+    filenames = [f"reference-{index}.png" for index in range(1, 6)]
+    payload = {
+        "tasks": [
+            {
+                "prompt": "让@图片1靠近@图片5",
+                "reference_mode": "REFERENCE",
+                "resolution": "720P",
+                "aspect_ratio": "9:16",
+                "duration_mode": "SMART",
+                "reference_images": filenames,
+            }
+        ]
+    }
+    files = [("payload", (None, json.dumps(payload), "application/json"))]
+    files.extend(
+        ("references_0", (filename, create_png_bytes(), "image/png"))
+        for filename in filenames
+    )
+
+    with client:
+        response = client.post("/api/video/batches", files=files)
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 201, response.text
+    with sessions() as session:
+        task = session.scalar(select(GenerationTask))
+        assert task is not None
+        assert task.prompt == "让图片1靠近图片5"
+        references = session.scalars(
+            select(TaskReferenceImage).order_by(TaskReferenceImage.position)
+        ).all()
+        assert [reference.position for reference in references] == list(range(5))
+        assert [reference.file_name for reference in references] == filenames
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "请参考图片1，让图片2中的人物也xxx",
+        "请参考@图片1，让图片2中的人物也xxx",
+        "请参考@图片1，让@图片2中的人物也xxx",
+    ],
+)
+def test_video_batch_core_prompt_scenarios_store_the_same_normalized_prompt(
+    workspace_tmp_path, monkeypatch, prompt: str
+) -> None:
+    client, sessions, _, _ = create_video_test_client(workspace_tmp_path, monkeypatch)
+    filenames = ["girl.png", "product.png"]
+    payload = {
+        "tasks": [
+            {
+                "prompt": prompt,
+                "reference_mode": "REFERENCE",
+                "resolution": "720P",
+                "aspect_ratio": "9:16",
+                "duration_mode": "SMART",
+                "reference_images": filenames,
+            }
+        ]
+    }
+    files = [("payload", (None, json.dumps(payload), "application/json"))]
+    files.extend(
+        ("references_0", (filename, create_png_bytes(), "image/png"))
+        for filename in filenames
+    )
+
+    with client:
+        response = client.post("/api/video/batches", files=files)
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 201, response.text
+    with sessions() as session:
+        task = session.scalar(select(GenerationTask))
+        assert task is not None
+        assert task.prompt == "请参考图片1，让图片2中的人物也xxx"
+        references = session.scalars(
+            select(TaskReferenceImage).order_by(TaskReferenceImage.position)
+        ).all()
+        assert [(item.position, item.file_name) for item in references] == [
+            (0, "girl.png"),
+            (1, "product.png"),
+        ]
+
+
+def test_video_batch_rejects_reference_above_uploaded_image_count(
+    workspace_tmp_path, monkeypatch
+) -> None:
+    client, sessions, _, _ = create_video_test_client(workspace_tmp_path, monkeypatch)
+    payload = {
+        "tasks": [
+            {
+                "prompt": "让@图片6进入镜头",
+                "reference_mode": "REFERENCE",
+                "resolution": "720P",
+                "aspect_ratio": "9:16",
+                "duration_mode": "SMART",
+                "reference_images": ["only.png"],
+            }
+        ]
+    }
+
+    with client:
+        response = client.post(
+            "/api/video/batches",
+            files=[
+                ("payload", (None, json.dumps(payload), "application/json")),
+                ("references_0", ("only.png", create_png_bytes(), "image/png")),
+            ],
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "INVALID_VIDEO_IMAGE_REFERENCE"
+    with sessions() as session:
+        assert session.scalar(select(GenerationTask)) is None
 
 
 # ── 视频提示词长度校验 ──

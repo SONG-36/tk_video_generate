@@ -10,6 +10,7 @@ from app.models.generation import BatchStatus, GenerationType, TaskStatus
 from app.models.video import (
     VideoAspectRatio,
     VideoDurationMode,
+    VideoModel,
     VideoOutputFormat,
     VideoReferenceMode,
     VideoResolution,
@@ -187,6 +188,6 @@ def test_exhausted_poll_network_retries_persist_failed_task_details(
         assert task.status == TaskStatus.FAILED
         assert task.error_code == "ARK_NETWORK_ERROR"
         assert task.provider == "volcengine_ark"
-        assert task.model == "test-model"
+        assert task.model == VideoModel.SEEDANCE_2_0_MINI.value
         assert task.provider_task_id == "ark-persisted-task"
         assert task.batch.status == BatchStatus.FAILED

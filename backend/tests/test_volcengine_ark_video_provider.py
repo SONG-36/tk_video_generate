@@ -41,6 +41,7 @@ async def generate_and_close_client(
 
 def make_request(
     *,
+    prompt: str = "A cat walking through neon rain",
     reference_mode: VideoReferenceMode = VideoReferenceMode.REFERENCE,
     duration_mode: VideoDurationMode = VideoDurationMode.FIXED,
     fixed_duration: int | None = 5,
@@ -49,7 +50,7 @@ def make_request(
 ) -> VideoGenerationRequest:
     return VideoGenerationRequest(
         task_id=1,
-        prompt="A cat walking through neon rain",
+        prompt=prompt,
         reference_mode=reference_mode,
         resolution=VideoResolution.P720,
         aspect_ratio=VideoAspectRatio.PORTRAIT_9_16,
@@ -157,6 +158,74 @@ def test_ark_maps_first_frame_and_smart_duration(workspace_tmp_path: Path) -> No
     )
     assert payload["generate_audio"] is False
     assert "duration" not in payload
+
+
+def test_ark_builds_five_images_in_input_order_and_normalizes_mentions(
+    workspace_tmp_path: Path,
+) -> None:
+    references = []
+    for index in range(1, 6):
+        reference = workspace_tmp_path / f"reference-{index}.png"
+        reference.write_bytes(f"image-{index}".encode())
+        references.append(reference)
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(500))
+    )
+    provider = VolcengineArkVideoGenerationProvider("key", "model", client=client)
+
+    payload = provider._build_payload(
+        make_request(
+            prompt="让@图片1靠近@图片5，邮箱 user@example.com",
+            reference_paths=references,
+        )
+    )
+    asyncio.run(client.aclose())
+
+    assert payload["content"][0]["text"] == "让图片1靠近图片5，邮箱 user@example.com"
+    image_items = payload["content"][1:]
+    assert len(image_items) == 5
+    assert [item["role"] for item in image_items] == ["reference_image"] * 5
+    assert [
+        base64.b64decode(item["image_url"]["url"].split(",", 1)[1])
+        for item in image_items
+    ] == [f"image-{index}".encode() for index in range(1, 6)]
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "请参考图片1，让图片2中的人物也xxx",
+        "请参考@图片1，让图片2中的人物也xxx",
+        "请参考@图片1，让@图片2中的人物也xxx",
+    ],
+)
+def test_ark_core_prompt_scenarios_produce_identical_text_and_image_order(
+    workspace_tmp_path: Path, prompt: str
+) -> None:
+    references = [
+        workspace_tmp_path / "girl.png",
+        workspace_tmp_path / "product.png",
+    ]
+    references[0].write_bytes(b"girl-image")
+    references[1].write_bytes(b"product-image")
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(500))
+    )
+    provider = VolcengineArkVideoGenerationProvider("key", "model", client=client)
+
+    payload = provider._build_payload(
+        make_request(prompt=prompt, reference_paths=references)
+    )
+    asyncio.run(client.aclose())
+
+    assert payload["content"][0] == {
+        "type": "text",
+        "text": "请参考图片1，让图片2中的人物也xxx",
+    }
+    assert [
+        base64.b64decode(item["image_url"]["url"].split(",", 1)[1])
+        for item in payload["content"][1:]
+    ] == [b"girl-image", b"product-image"]
 
 
 @pytest.mark.parametrize(

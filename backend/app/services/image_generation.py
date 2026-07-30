@@ -100,14 +100,22 @@ class ImageBatchService:
                             mime_type=image.mime_type,
                         )
                     )
-            session.commit()
-            session.refresh(batch)
-            return batch
+            session.flush()
         except Exception:
             session.rollback()
             for path in saved_paths:
-                self.storage.delete(path)
+                self.storage.try_delete(path, context="image_batch_flush")
             raise
+
+        try:
+            # commit 成功后文件已被数据库引用，因此提交之后不再执行可能触发文件补偿的 refresh。
+            session.commit()
+        except Exception:
+            session.rollback()
+            for path in saved_paths:
+                self.storage.try_delete(path, context="image_batch_commit")
+            raise
+        return batch
 
     async def add_reference(
         self,
@@ -140,12 +148,12 @@ class ImageBatchService:
         )
         try:
             session.add(reference)
+            session.flush()
             session.commit()
-            session.refresh(reference)
             return reference
         except Exception:
             session.rollback()
-            self.storage.delete(relative_path)
+            self.storage.try_delete(relative_path, context="image_reference_write")
             raise
 
 
@@ -219,14 +227,14 @@ class ImageGenerationService:
             self._record_usage(task, result.usage)
             self._refresh_batch(task.batch)
             session.commit()
-            for path in old_paths:
-                self.storage.delete(path)
-            return task
         except Exception:
             session.rollback()
             for path in saved_paths:
-                self.storage.delete(path)
+                self.storage.try_delete(path, context="image_result_write")
             raise
+        for path in old_paths:
+            self.storage.try_delete(path, context="image_old_result")
+        return task
 
     @staticmethod
     def mark_failed(session: Session, task_id: int, exc: Exception) -> None:

@@ -1,7 +1,10 @@
+import logging
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class FileStorageService:
@@ -40,10 +43,32 @@ class FileStorageService:
         relative = PurePosixPath(directory) / filename
         target = self.resolve_relative(relative.as_posix())
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(content)
+        try:
+            target.write_bytes(content)
+        except Exception:
+            # 写入失败时文件可能已被创建；清理失败只记录类型，不能覆盖原始写入异常。
+            try:
+                target.unlink(missing_ok=True)
+            except OSError as cleanup_exc:
+                logger.warning(
+                    "清理未完成的文件失败 exception_type=%s",
+                    type(cleanup_exc).__name__,
+                )
+            raise
         return relative.as_posix(), len(content)
 
     def delete(self, relative_path: str) -> None:
         target = self.resolve_relative(relative_path)
         if target.is_file():
             target.unlink()
+
+    def try_delete(self, relative_path: str, *, context: str) -> None:
+        """补偿性删除不得覆盖触发补偿的原始业务异常。"""
+        try:
+            self.delete(relative_path)
+        except Exception as exc:
+            logger.warning(
+                "文件补偿清理失败 context=%s exception_type=%s",
+                context,
+                type(exc).__name__,
+            )

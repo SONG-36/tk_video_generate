@@ -18,6 +18,10 @@ from app.providers.video.base import (
     VideoGenerationResult,
     VideoProviderUsage,
 )
+from app.services.video_prompt import (
+    VideoPromptReferenceError,
+    normalize_video_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +283,13 @@ class VolcengineArkVideoGenerationProvider(VideoGenerationProvider):
         raise RuntimeError("unreachable poll retry state")
 
     def _build_payload(self, request: VideoGenerationRequest) -> dict[str, Any]:
-        content: list[dict[str, Any]] = [{"type": "text", "text": request.prompt}]
+        try:
+            # 正常任务已由服务层标准化；这里保留幂等校验，防止其他调用方绕过业务入口。
+            prompt = normalize_video_prompt(request.prompt, len(request.reference_paths))
+        except VideoPromptReferenceError as exc:
+            raise AppError(str(exc), "INVALID_VIDEO_IMAGE_REFERENCE", 422) from exc
+
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         role = (
             "first_frame"
             if request.reference_mode == VideoReferenceMode.FIRST_FRAME

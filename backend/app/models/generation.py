@@ -130,7 +130,12 @@ class GenerationTask(Base):
         back_populates="task", cascade="all, delete-orphan", uselist=False
     )
     reference_images: Mapped[list["TaskReferenceImage"]] = relationship(
-        back_populates="task", cascade="all, delete-orphan"
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by=(
+            "TaskReferenceImage.position.is_(None), "
+            "TaskReferenceImage.position, TaskReferenceImage.id"
+        ),
     )
     results: Mapped[list["GenerationResult"]] = relationship(
         back_populates="task", cascade="all, delete-orphan"
